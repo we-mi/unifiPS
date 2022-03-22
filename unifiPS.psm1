@@ -223,12 +223,12 @@ function Get-UnifiServerInfo {
 function Get-UnifiLogin {
     <#
     .SYNOPSIS
-        Reads information about the currently logged in user
+        Shows information about the currently logged in user
     .DESCRIPTION
-        Reads information about the currently logged in user
+        Shows information about the currently logged in user
     .EXAMPLE
         PS C:\> Get-UnifiLogin
-        Reads the information
+        Shows information about the currently logged in user
     #>
     [CmdletBinding()]
     [OutputType([Object])]
