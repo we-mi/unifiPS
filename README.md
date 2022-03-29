@@ -170,14 +170,19 @@ Delete firewall rule:
 
 ## TODO
 
-* [ ] Add more help descriptions
+* [x] Add more help descriptions
 * [ ] Add more filters to Get-Unifi*-Functions, so `Where-Object`-Piping is not necessary anymore
 * [ ] Review error-messages
 
 More functions will follow, for example:
-* [ ] creating sites
-* [ ] removing sites
+* [x] creating sites
+* [x] removing sites
+* [ ] editing site-settings
 * [ ] blocking clients
-* [ ] update firmware for access-points
-* [ ] forget (remove) access-points
+* [ ] update firmware devices
+* [ ] downgrade devices
+* [ ] forget (remove) devices#
+* [ ] create networks
+* [ ] create wireless networks
+* [ ] control guest profiles
 * ...
