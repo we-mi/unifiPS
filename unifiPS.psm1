@@ -2,6 +2,7 @@ $Script:WebSession = $null
 $Script:BaseUri = $null
 $Script:RestHeaders = $null
 
+#region internal functions
 function Invoke-UnifiRestCall {
     [CmdletBinding()]
     [OutputType([Object])]
@@ -13,17 +14,17 @@ function Invoke-UnifiRestCall {
         [string]
         $Method,
 
-        # REST route
+        # REST route (URI)
         [Parameter(Mandatory = $True)]
         [string]
         $Route,
 
-        # Rest Body
+        # Body for Invoke-RestMethod (will only be applied if $Method is POST, PUT or DELETE)
         [Parameter(Mandatory = $False)]
         [Object]
         $Body,
 
-        # Rest Body
+        # Custom Parameters for Invoke-RestMethod
         [Parameter(Mandatory = $False)]
         [Object]
         $CustomRestParams
@@ -37,6 +38,10 @@ function Invoke-UnifiRestCall {
             WebSession = $Script:WebSession
             Method = $Method
             Verbose = $false
+        }
+
+        if ($script:useSkipCertParam) {
+            $restParams.SkipCertificateCheck = $true
         }
 
         if ($CustomRestParams) {
@@ -65,10 +70,11 @@ function Invoke-UnifiRestCall {
                 $script:WebSession = $WebSession
             }
         }
-
     }
 }
+#endregion
 
+#region Authentication
 function Invoke-UnifiLogin {
     <#
     .SYNOPSIS
@@ -80,10 +86,14 @@ function Invoke-UnifiLogin {
 
         A timeout can be specified for the webrequest
     .EXAMPLE
-        PS C:\> Invoke-UnifiLogin -Uri https://192.168.178.1:8443/api -Timeout 5
+        PS C:\> Invoke-UnifiLogin -Uri https://localhost:8443/api -Timeout 5
         Logs in to the unifi server at the specified address and wait max. 5 seconds
+    .OUTPUTS
+        Returns $True on Success
+        Returns $False on Failure
     #>
     [CmdletBinding()]
+    [OutputType([Boolean])]
 
     param(
         # Uri of the UniFi Server
@@ -114,8 +124,12 @@ function Invoke-UnifiLogin {
         $script:Timeout = $Timeout
         $Script:WebSession = $null
 
-        try {
-            add-type @"
+        $TestSkipCertParam = (Get-Command Invoke-RestMethod).Parameters.SkipCertificateCheck
+        if ($TestSkipCertParam) { # Parameter to skip cert is available, so why not use it
+            $script:useSkipCertParam = $true
+        } else { # Parameter to skip cert is not available, try a workaround
+            try {
+                add-type @"
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
 public class TrustAllCertsPolicy : ICertificatePolicy {
@@ -126,9 +140,9 @@ public class TrustAllCertsPolicy : ICertificatePolicy {
     }
 }
 "@
-        } catch {}
-
-        [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+                [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+            } catch {}
+        }
 
         if (!($Credential)) {
             $Credential = (Get-Credential -Message "Login for UniFi-Controller $($script:BaseUri)")
@@ -144,15 +158,21 @@ public class TrustAllCertsPolicy : ICertificatePolicy {
             Method = "Post"
         }
 
+        if ($script:useSkipCertParam) {
+            $restParams.SkipCertificateCheck = $true
+        }
+
         $jsonResult = Invoke-UnifiRestCall -Method POST -Route "login" -Body $Body -CustomRestParams $restParams
 
         $Credential = $null
         $Body = $null
 
         if ($jsonResult.meta.rc -eq "ok") {
-            Write-Host -ForegroundColor Green "Login to Unifi-Controller successful"
+            Write-Verbose "Login to Unifi-Controller successful"
+            return $True
         } else {
-            Write-Host -ForegroundColor Red "Login to Unifi-Controller failed"
+            Write-Error "Login to Unifi-Controller failed"
+            return $False
         }
     }
 }
@@ -166,36 +186,43 @@ function Invoke-UnifiLogout {
     .EXAMPLE
         PS C:\> Invoke-UnifiLogout
         Logs out of the server
+    .OUTPUTS
+        Returns $True on Success
+        Returns $False on Failure
     #>
     [CmdletBinding()]
     [OutputType([Boolean])]
 
     param()
 
-    begin {
-    }
-
     process {
         $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/logout"
 
         if ($jsonResult.meta.rc -eq "ok") {
-            Write-Host -ForegroundColor Green "Logout from Unifi-Controller successful"
+            Write-Verbose "Logout from Unifi-Controller successful"
+            return $True
         } else {
-            Write-Host -ForegroundColor Red "Logout from Unifi-Controller failed"
+            Write-Error "Logout from Unifi-Controller failed"
+            return $False
         }
         
     }
 }
+#endregion
 
+#region Unifi Controller information
 function Get-UnifiServerInfo {
     <#
     .SYNOPSIS
         Grabs simple information from the unifi server (state,version,uuid)
     .DESCRIPTION
         Grabs simple information from the unifi server (state,version,uuid)
+        You do not need to be logged in to grap this information
     .EXAMPLE
         PS C:\> Get-UnifiServerInfo
         Grabs the information
+    .OUTPUTS
+        Returns JSON-Data
     #>
     [CmdletBinding()]
     [OutputType([Object])]
@@ -219,7 +246,9 @@ function Get-UnifiServerInfo {
         }
     }
 }
+#endregion
 
+#region User information
 function Get-UnifiLogin {
     <#
     .SYNOPSIS
@@ -229,6 +258,8 @@ function Get-UnifiLogin {
     .EXAMPLE
         PS C:\> Get-UnifiLogin
         Shows information about the currently logged in user
+    .OUTPUTS
+        Returns JSON-Data
     #>
     [CmdletBinding()]
     [OutputType([Object])]
@@ -253,19 +284,101 @@ function Get-UnifiLogin {
     }
 }
 
+function Get-UnifiAdmin {
+    <#
+    .SYNOPSIS
+        Lists unifi admins for all or just one site
+    .DESCRIPTION
+        Lists unifi admins for all or just one site
+    .EXAMPLE
+        PS C:\> Get-UnifiAdmin -All
+        Lists unifi admins for all sites
+        
+        PS C:\> Get-UnifiAdmin -SiteName "Default"
+        Lists unifi admins for site "Default"
+    .OUTPUTS
+        Returns JSON-Data
+    #>
+    [CmdletBinding()]
+    [OutputType([Object])]
+
+    param(
+        # SiteName 
+        [Parameter(Mandatory = $false, ParameterSetName="SiteName", ValueFromPipelineByPropertyName=$True)]
+        [string]
+        $SiteName,
+
+        # Do not filter or rename output, just sent the json result back as raw data
+        [Parameter(Mandatory = $false)]
+        [switch]
+        $Raw,
+
+        # List Admins for all sites
+        [Parameter(Mandatory = $false, ParameterSetName="All")]
+        [switch]
+        $All
+    )
+   
+    process {
+        if (!$All -and [string]::IsNullOrWhiteSpace($SiteName)) {
+            Write-Error "No SiteName was given"
+        } else {
+            if ($All) {
+                $jsonResult = Invoke-UnifiRestCall -Method GET -Route "api/stat/admin"
+            } else {
+                $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/s/$($SiteName)/cmd/sitemgr" -Body (@{cmd = "get-admins"} | ConvertTo-JSON)
+            }
+
+            if ($jsonResult.meta.rc -eq "ok") {
+                if ($Raw) {
+                    $jsonResult.data
+                } else {
+                    if ($All) {
+                        $jsonResult.data | Select-Object    name,email,
+                                                        @{N="UserID";E={$_._id}},
+                                                        @{N="SuperAdmin";E={$_.is_super}},
+                                                        @{N="Roles";E={$_.roles}},
+                                                        @{N="SuperRoles";E={$_.super_roles}},
+                                                        @{N="CreatedOn";E={ ( Get-Date('1970-01-01 00:00:00') ).AddSeconds($_.time_created) }},
+                                                        @{N="LastSiteName";E={$_.last_site_name}},
+                                                        @{N="EMailAlert";E={$_.email_alert_enabled}}
+                    } else {
+                        $jsonResult.data | Select-Object    name,email,
+                                                        @{N="UserID";E={$_._id}},
+                                                        @{N="Permissions";E={$_.permissions}},
+                                                        @{N="SuperAdmin";E={$_.is_super}},
+                                                        @{N="Role";E={$_.role}},
+                                                        @{N="EMailAlert";E={$_.email_alert_enabled}}
+                    }
+                }
+            }
+        }
+    }
+}
+#endregion
+
+#region Basic site handling
 function Get-UnifiSite {
     <#
     .SYNOPSIS
-        Gets all sites of the unifi controller
+        Gets one or more sites of the unifi controller
     .DESCRIPTION
-        Gets all sites of the unifi controller
-        You can filter by name (internal site name) or id or DisplayName (name visible in the web interface, unifi's internal name for this field is 'desc')
+        Gets one or more sites of the unifi controller
+        You can filter by SiteName (internal site name) or SiteID or SiteDisplayName (name visible in the web interface, unifi's internal name for this field is 'desc')
     .EXAMPLE
         PS C:\> Get-UnifiSite -DisplayName *
         Lists all sites
     .EXAMPLE
         PS C:\> Get-UnifiSite -DisplayName "Default","*Test*"
         Lists all sites which contains the string "Test" and the site with the name "Default"
+    .EXAMPLE
+        PS C:\> Get-UnifiSite -SiteName "67itznop"
+        Lists the site with the SiteName '67itznop'
+    .EXAMPLE
+        PS C:\> Get-UnifiSite SiteID "623e1bf66a5d4f1280160b7e"
+        Lists the site with the ID '623e1bf66a5d4f1280160b7e'
+    .OUTPUTS
+        Returns JSON-Data
     #>
     [CmdletBinding(DefaultParameterSetName="SiteDisplayName")]
     [OutputType([Object])]
@@ -326,12 +439,243 @@ function Get-UnifiSite {
                 if ($Raw) {
                     $jsonResult.data 
                 } else {
-                    $jsonResult.data | Select-Object @{N="SiteID";E={$_._id}},@{N="SiteDisplayName";E={$_.desc}},@{N="SiteName";E={$_.name}},@{N="NoDelete";E={ if ($_.attr_no_delete) {$_.attr_no_delete} else { $False }}}
+                    $jsonResult.data | Select-Object    @{N="SiteID";E={$_._id}},
+                                                        @{N="SiteDisplayName";E={$_.desc}},
+                                                        @{N="SiteName";E={$_.name}},
+                                                        @{N="NoDelete";E={ if ($_.attr_no_delete) {$_.attr_no_delete} else { $False }}}
                 }
             }
 
         } catch {
             Write-Error "Something went wrong while fetching sites ($($_.Exception))" -ErrorAction Stop
+        }
+    }
+}
+
+function New-UnifiSite {
+    <#
+    .SYNOPSIS
+        Creates a new unifi site
+    .DESCRIPTION
+        Creates a new unifi site.
+        It does check if a site with the same name is already present (You can have more than one site with the same DisplayName in the unifi controller (a bit stupid if you ask me...))
+        If you want to disable this check, use the 'DisableNameCheck'-Switch
+    .EXAMPLE
+        PS C:\> New-UnifiSite -SiteDisplayName "My New Site"
+        Creates the new unifi site 'My New Site'
+    .EXAMPLE
+        PS C:\> New-UnifiSite -SiteDisplayName "My New Site" DisableNameCheck
+        Creates the new unifi site 'My New Site' even if a site with this DisplayName is already present
+    .OUTPUTS
+        Returns JSON-Data from the newly created site
+    #>
+    [CmdletBinding()]
+    [OutputType([Object])]
+
+    param(
+        # (Display-)Name of the site under which it appears in the webui
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true, ValueFromPipeline = $true, Position = 0 )]
+        [String]
+        $SiteDisplayName,
+
+        # Disable checking if a site name is already present
+        [Parameter(Mandatory = $false)]
+        [switch]
+        $DisableNameCheck,
+
+        # Do not filter or rename output, just sent the json result back as raw data
+        [Parameter(Mandatory = $false)]
+        [switch]
+        $Raw
+    )
+   
+    process {
+        try {
+
+            if (!$DisableNameCheck) {
+                $sites = Get-UnifiSite "*"
+
+                if ($sites.SiteDisplayName -contains $SiteDisplayName) {
+                    Write-Error "There's already a site with the DisplayName '$SiteDisplayName' present."
+                    return ""
+                }
+            }
+
+            $Body = @{
+                cmd = "add-site"
+                desc = $SiteDisplayName
+            } | ConvertTo-Json
+
+            $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/s/default/cmd/sitemgr" -Body $Body
+
+            if ($jsonResult.meta.rc -eq "ok") {
+                Write-Verbose "Site '$SiteDisplayName' successfully created"
+
+                if ($Raw) {
+                    $jsonResult.data
+                } else {
+                    $jsonResult.data | Select-Object    @{N="SiteName";E={$_.name}},
+                                                        @{N="SiteID";E={$_._id}},
+                                                        @{N="SiteDisplayName";E={$_.desc}}
+
+                }
+            } else {
+               Write-Error "Site '$SiteDisplayName' was NOT created ($jsonResult.meta.msg)" 
+            }
+
+        } catch {
+            Write-Warning "Something went wrong while creating a new site $($SiteDisplayName) ($_)"
+        }
+    }
+}
+
+function Remove-UnifiSite {
+    <#
+    .SYNOPSIS
+        Deletes a unifi site
+    .DESCRIPTION
+        Deletes a unifi site. Be careful with this!
+    .EXAMPLE
+        PS C:\> Remove-UnifiSite -SiteName 67itznop
+        Removes the unifi site with the SiteName '67itznop', but asks for confirmation
+    .EXAMPLE
+        PS C:\> Get-UnifiSite -SiteDisplayName 'ProductionSite' | Remove-UnifiSite -Force
+        Removes the unifi site with the DisplayName 'ProductionSite' and does NOT ask for confirmation
+    .OUTPUTS
+        Returns $True on Success
+        Returns $False on Failure
+    #>
+    [CmdletBinding()]
+    [OutputType([boolean])]
+
+    param(
+        # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
+        [String]
+        $SiteName,
+
+        # Do not ask for confirmation
+        [Parameter(Mandatory = $false)]
+        [switch]
+        $Force
+    )
+   
+    process {
+        try {
+            $site = Get-UnifiSite -SiteName $SiteName
+
+            if ($site) {
+                if (!$Force) {
+                    do {
+                        $answer = Read-Host -Prompt "Do you really want to delete the site '$($SiteName)' (DisplayName: $($site.SiteDisplayName))? Be **extremely careful with this** (y/N): "
+                    } while($answer -ne "y" -and $answer -ne "n" -and $answer -ne "")
+
+                    if ($answer -eq "" -or $answer -eq "n") {
+                        Write-Verbose "Deletion of site '$($SiteName)' (DisplayName: $($site.SiteDisplayName)) was aborted by user"
+                        return $False
+                    }
+
+                }
+
+                $Body = @{
+                    site = $site.SiteID
+                    cmd = "delete-site"
+                } | ConvertTo-Json
+                $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/s/$($SiteName)/cmd/sitemgr" -Body $Body
+
+                if ($jsonResult.meta.rc -eq "ok") {
+                    Write-Verbose "Site '$($SiteName)' (DisplayName: $($site.SiteDisplayName)) successfully deleted"
+                    return $True
+                } else {
+                    Write-Error "Site '$($SiteName)' (DisplayName: $($site.SiteDisplayName)) was NOT deleted"
+                    return $False
+                }
+            } else {
+                Write-Error "No site '$SiteName' was found"
+                return $False
+            }
+
+        } catch {
+            Write-Warning "Something went wrong while removing site $($SiteName) ($_)"
+            return $False
+        }
+    }
+}
+
+function Rename-UnifiSite {
+    <#
+    .SYNOPSIS
+        Renames a unifi site
+    .DESCRIPTION
+        Renames a unifi site
+    .EXAMPLE
+        PS C:\> Rename-UnifiSite -SiteName '67itznop' -NewSiteDisplayName "my wonderful site"
+        Renames the unifi site with the SiteName '67itznop' to 'my wonderful site'. Note that the SiteName keeps the same. Only the SiteDisplayName in the webui changes
+    .EXAMPLE
+        PS C:\> Get-UnifiSite -SiteDisplayName 'Development' | Rename-UnifiSite 
+        Renames the unifi site with the SiteName '67itznop' to 'my wonderful site'. Note that the SiteName keeps the same. Only the SiteDisplayName in the webui changes
+    .OUTPUTS
+        Returns JSON-Data
+    #>
+    [CmdletBinding()]
+    [OutputType([Object])]
+
+    param(
+        # Name of the site which will be renamed (Unifi's internal name is used, not the name visible in the web interface) 
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
+        [String]
+        $SiteName,
+
+        # New DisplayName of the site
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
+        [Alias("SiteDisplayName")]
+        [String]
+        $NewSiteDisplayName,
+
+        # Do not filter or rename output, just sent the json result back as raw data
+        [Parameter(Mandatory = $false)]
+        [switch]
+        $Raw
+    )
+   
+    process {
+        try {
+            $site = Get-UnifiSite -SiteName $SiteName
+
+            if ($site) {
+
+                if ($site.SiteDisplayName -eq $NewSiteDisplayName) {
+                    Write-Warning "Nothing to do. Old and new display names match"
+                } else {
+
+                    $Body = @{
+                        desc = $NewSiteDisplayName
+                        cmd = "update-site"
+                    } | ConvertTo-Json
+
+                    $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/s/$($SiteName)/cmd/sitemgr" -Body $Body
+
+                    if ($jsonResult.meta.rc -eq "ok") {
+                        Write-Verbose "Site '$($SiteName)' was renamed from '$($site.NewSiteDisplayName)' to '$NewSiteDisplayName'"
+                        if ($Raw) {
+                            $jsonResult.data
+                        } else {
+                            $jsonResult.data | Select-Object    @{N="SiteID";E={$_._id}},
+                                                                @{N="NewSiteDisplayName";E={$_.desc}},
+                                                                @{N="SiteName";E={$_.name}},
+                                                                @{N="NoDelete";E={ if ($_.attr_no_delete) {$_.attr_no_delete} else { $False }}}
+                        }
+
+                    } else {
+                        Write-Error "Site '$($SiteName)' (DisplayName: $($site.NewSiteDisplayName)) was NOT renamed"
+                    }
+                }
+            } else {
+                Write-Error "No site '$SiteName' was found"
+            }
+
+        } catch {
+            Write-Warning "Something went wrong while renaming site $($SiteName) ($_)"
         }
     }
 }
@@ -347,15 +691,16 @@ function Get-UnifiSiteInfo {
         www (status, )
         lan (status, # adopted, #disconnected, # pending, # sw(?))
         vpn (status).
-        Each of this entries are returned as a single hashtable
 
         You can pipe the output from "Get-UnifiSite" to this cmdlet
     .EXAMPLE
-        PS C:\> Get-UnifiSiteInfo
-        Gets information from all sites
+        PS C:\> Get-UnifiSiteInfo -SiteName default
+        Gets information from the default site
     .EXAMPLE
-        PS C:\> Get-UnifiSiteInfo -friendlyName "*Einhard*"
-        Gets information from all sites which contains the string "Einhard"
+        PS C:\> Get-UnifiSite * | Get-UnifiSiteInfo
+        Gets information from all sites
+    .OUTPUTS
+        Returns JSON-Data
     #>
     [CmdletBinding()]
     [OutputType([Object])]
@@ -466,92 +811,25 @@ function Get-UnifiSiteInfo {
         
     }
 }
+#endregion
 
-function Get-UnifiAdmin {
-    <#
-    .SYNOPSIS
-        Lists unifi admins for all or just one site
-    .DESCRIPTION
-        Lists unifi admins for all or just one site
-    .EXAMPLE
-        PS C:\> Get-UnifiAdmin -All
-        Lists unifi admins for all sites
-        
-        PS C:\> Get-UnifiAdmin -SiteName "Default"
-        Lists unifi admins for site "Default"
-    #>
-    [CmdletBinding()]
-    [OutputType([Object])]
-
-    param(
-        # Do not filter or rename output, just sent the json result back as raw data
-        [Parameter(Mandatory = $false)]
-        [switch]
-        $Raw,
-
-        # List Admins for all sites
-        [Parameter(Mandatory = $false, ParameterSetName="All")]
-        [switch]
-        $All,
-
-        # SiteName 
-        [Parameter(Mandatory = $false, ParameterSetName="SiteName", ValueFromPipelineByPropertyName=$True)]
-        [string]
-        $SiteName
-    )
-   
-    process {
-        if (!$All -and [string]::IsNullOrWhiteSpace($SiteName)) {
-            Write-Error "No SiteName was given"
-        } else {
-            if ($All) {
-                $jsonResult = Invoke-UnifiRestCall -Method GET -Route "api/stat/admin"
-            } else {
-                $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/s/$($SiteName)/cmd/sitemgr" -Body (@{cmd = "get-admins"} | ConvertTo-JSON)
-            }
-
-            if ($jsonResult.meta.rc -eq "ok") {
-                if ($Raw) {
-                    $jsonResult.data
-                } else {
-                    if ($All) {
-                        $jsonResult.data | Select-Object    name,email,
-                                                        @{N="UserID";E={$_._id}},
-                                                        @{N="SuperAdmin";E={$_.is_super}},
-                                                        @{N="Roles";E={$_.roles}},
-                                                        @{N="SuperRoles";E={$_.super_roles}},
-                                                        @{N="CreatedOn";E={ ( Get-Date('1970-01-01 00:00:00') ).AddSeconds($_.time_created) }},
-                                                        @{N="LastSiteName";E={$_.last_site_name}},
-                                                        @{N="EMailAlert";E={$_.email_alert_enabled}}
-                    } else {
-                        $jsonResult.data | Select-Object    name,email,
-                                                        @{N="UserID";E={$_._id}},
-                                                        @{N="Permissions";E={$_.permissions}},
-                                                        @{N="SuperAdmin";E={$_.is_super}},
-                                                        @{N="Role";E={$_.role}},
-                                                        @{N="EMailAlert";E={$_.email_alert_enabled}}
-                    }
-
-                }
-            }
-        }
-    }
-}
-
+#region Log/Events/Alarms
 function Get-UnifiEvent {
     <#
     .SYNOPSIS
         Gets events for a unifi site
     .DESCRIPTION
-        Gets events for a unifi site
+        Gets events for a unifi site. The default limit for events is 500. Use a limit of 0 to disable this limit. But note that the unifi controller api has a max limit of 3000 entries
 
         You can pipe the output from "Get-UnifiSite" to this cmdlet
     .EXAMPLE
         PS C:\> Get-UnifiSite -DisplayName "Test" | Get-UnifiEvent
         Gets events from site with the DisplayName "Test"
     .EXAMPLE
-        PS C:\> Get-UnifiEvent -SiteName "01gg6pt0"
-        Gets events from the site with the (internal) name "01gg6pt0". If you want to use the display name for searching see the previous example
+        PS C:\> Get-UnifiEvent -SiteName "01gg6pt0" -Limit 0
+        Gets events from the site with the (internal) name "01gg6pt0". Use the unifi controllers default limit of 3000 entries
+    .OUTPUTS
+        Returns JSON-Data
     #>
     [CmdletBinding()]
     [OutputType([Object])]
@@ -609,7 +887,7 @@ function Get-UnifiAlarm {
     .SYNOPSIS
         Gets alarms for a unifi site
     .DESCRIPTION
-        Gets alarms for a unifi site
+        Gets alarms for a unifi site. The default limit for alarms is 500. Use a limit of 0 to disable this limit. But note that the unifi controller api has a max limit of 3000 entries
 
         You can pipe the output from "Get-UnifiSite" to this cmdlet
     .EXAMPLE
@@ -617,7 +895,9 @@ function Get-UnifiAlarm {
         Gets alarms from site with the DisplayName "Test"
     .EXAMPLE
         PS C:\> Get-UnifiAlarm -SiteName "01gg6pt0"
-        Gets alarms from the site with the (internal) name "01gg6pt0". If you want to use the display name for searching see the previous example
+        Gets alarms from the site with the (internal) name "01gg6pt0"
+    .OUTPUTS
+        Returns JSON-Data
     #>
     [CmdletBinding()]
     [OutputType([Object])]
@@ -669,7 +949,9 @@ function Get-UnifiAlarm {
         
     }
 }
+#endregion
 
+#region Device Management
 function Get-UnifiDevice {
     <#
     .SYNOPSIS
@@ -681,6 +963,11 @@ function Get-UnifiDevice {
     .EXAMPLE
         PS C:\> Get-UnifiDevice -SiteName "default"
         Returns all devices from site "default"
+    .EXAMPLE
+        PS C:\> Get-UnifiSite * | Get-UnifiDevice
+        Returns all devices from all sites
+    .OUTPUTS
+        Returns JSON-Data
     #>
     [CmdletBinding()]
     [OutputType([Object])]
@@ -729,12 +1016,11 @@ function Get-UnifiDevice {
                                                         @{N="Load15";E={ $_.sys_stats.loadavg_15 }},
                                                         @{N="CPUUsed";E={ $_."system-stats".cpu }},
                                                         @{N="MemUsed";E={ $_."system-stats".mem }}
-
                 }
             }
 
         } catch {
-            Write-Error "Something went wrong while fetching sites ($($_.Exception))" -ErrorAction Stop
+            Write-Error "Something went wrong while fetching devices ($($_.Exception))" -ErrorAction Stop
         }
     }
 }
@@ -744,18 +1030,21 @@ function Restart-UnifiDevice {
     .SYNOPSIS
         Restarts a unifi device
     .DESCRIPTION
-        Restarts a unifi device
+        Restarts a unifi device. Use the $Force-Switch to skip asking for confirmation
 
         You can pipe the output from "Get-UnifiDevice" to this cmdlet
     .EXAMPLE
         PS C:\> Get-UnifiSite "Test" | Get-UnifiDevice "AP01" | Restart-UnifiDevice
-        Restarts the device with the name "AP01" in site "Test"
+        Restarts the device with the name "AP01" in site "Test", but asks for confirmation
     .EXAMPLE
-        PS C:\> Restart-UnifiDevice -SiteName "Test" -MAC "00:11:22:33:44:55"
-        Restarts the device with the mac "00:11:22:33:44:55" in site "Test"
+        PS C:\> Restart-UnifiDevice -SiteName "Test" -MAC "00:11:22:33:44:55" -Force
+        Restarts the device with the mac "00:11:22:33:44:55" in site "Test" and does not ask for confirmation
+    .OUTPUTS
+        Returns $True on Success
+        Returns $False on Failure
     #>
     [CmdletBinding()]
-    [OutputType([Object])]
+    [OutputType([Boolean])]
 
     param(
         # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
@@ -763,7 +1052,7 @@ function Restart-UnifiDevice {
         [String]
         $SiteName,
 
-        # MAC of the device to reconnect
+        # MAC of the device to restart
         [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
         [String]
         $MAC,
@@ -796,12 +1085,15 @@ function Restart-UnifiDevice {
             $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/s/$($SiteName)/cmd/devmgr" -Body (@{cmd = "restart"; mac = $MAC; reboot_type = "soft"} | ConvertTo-JSON)
 
             if ($jsonResult.meta.rc -eq "ok") {
-
-                Write-Host -ForegroundColor Yellow "Device with '$MAC' will reboot now"
+                Write-Verbose "Device with MAC '$MAC' will reboot now"
+                return $True
+            } else {
+                Write-Error "Could not reboot device mit MAC '$MAC'"
+                return $False
             }
 
         } catch {
-            Write-Error "Something went wrong while fetching sites ($($_.Exception))" -ErrorAction Stop
+            Write-Error "Something went wrong while rebooting device with MAC '$MAC' ($($_.Exception))" -ErrorAction Stop
         }
         
     }
@@ -817,13 +1109,16 @@ function Sync-UnifiDevice {
         You can pipe the output from "Get-UnifiDevice" to this cmdlet
     .EXAMPLE
         PS C:\> Get-UnifiSite "Test" | Get-UnifiDevice "AP01" | Sync-UnifiDevice
-        Restarts the device with the name "AP01" in site "Test"
+        Provisions the device with the name "AP01" in site "Test"
     .EXAMPLE
         PS C:\> Sync-UnifiDevice -SiteName "Test" -MAC "00:11:22:33:44:55"
-        Restarts the device with the mac "00:11:22:33:44:55" in site "Test"
+        Provisions the device with the mac "00:11:22:33:44:55" in site "Test"
+    .OUTPUTS
+        Returns $True on Success
+        Returns $False on Failure
     #>
     [CmdletBinding()]
-    [OutputType([Object])]
+    [OutputType([Boolean])]
 
     param(
         # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
@@ -848,8 +1143,11 @@ function Sync-UnifiDevice {
             $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/s/$($SiteName)/cmd/devmgr" -Body (@{cmd = "force-provision"; mac = $MAC} | ConvertTo-JSON)
 
             if ($jsonResult.meta.rc -eq "ok") {
-
-                Write-Host -ForegroundColor Yellow "Device with '$MAC' will force a provision"
+                Write-Verbose "Device with '$MAC' will force a provision"
+                return $True
+            } else {
+                Write-Error "Could not force a provision for device with MAC '$MAC'"
+                return $False
             }
 
         } catch {
@@ -859,6 +1157,101 @@ function Sync-UnifiDevice {
     }
 }
 
+function Edit-UnifiDevice { # not tested yet
+    <#
+    .SYNOPSIS
+        Edits a unifi device (access point, gateway, switch, etc)
+    .DESCRIPTION
+        TODO
+    .EXAMPLE
+        PS C:\> Edit-UnifiDevice TODO
+    .EXAMPLE
+        PS C:\> TODO
+    #>
+    [CmdletBinding()]
+    [OutputType([Object])]
+
+    param(
+        # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
+        [String]
+        $SiteName,
+
+        # Do not filter or rename output, just sent the json result back as raw data
+        [Parameter(Mandatory = $false)]
+        [switch]
+        $Raw,
+
+        # ID of the Device to be edited
+        [Parameter(
+            Mandatory = $true,
+            ValueFromPipelineByPropertyName = $true
+        )]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $DeviceID,
+
+        # New name of the device. Leave empty to keep the name
+        [Parameter(
+            Mandatory = $false,
+            ValueFromPipelineByPropertyName = $true
+        )]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $DeviceName
+    )
+   
+    process {
+        
+        try {
+            $Device = Get-UnifiDevice -SiteName $SiteName | Where-Object { $_.DeviceID -eq $DeviceID }
+
+            if ($Device) {
+
+                # Use current name if no new name was given
+                if ([String]::IsNullOrWhiteSpace($DeviceName)) {
+                    $DeviceName = $Device.DeviceName
+                }
+
+                $Body = @{
+                    #'_id' = $Device.GroupID
+                    #'site_id' = $Device.SiteID
+                    name = $GroupName
+                    #group_type = $Device.GroupType
+                    #group_members = $GroupMembers
+                } | ConvertTo-Json
+                
+                $jsonResult = Invoke-UnifiRestCall -Method PUT -Route "api/s/$($siteName)/rest/device/$($Device.DeviceID)" -Body $Body 
+
+                if ($jsonResult.meta.rc -eq "ok") {
+                    Write-Verbose "Device '$DeviceName' was successfully edited for site '$SiteName'"
+                    
+                    if ($Raw) {
+                        $jsonResult.data
+                    } else {
+                        $jsonResult.data <# | Select-Object    @{N="SiteName";E={$SiteName}},
+                                                            @{N="SiteID";E={$_.site_id}},
+                                                            @{N="GroupID";E={$_._id}},
+                                                            @{N="GroupName";E={$_.name}},
+                                                            @{N="GroupMembers";E={$_.group_members}},
+                                                            @{N="GroupType";E={$_.group_type}} #>
+                    }
+                } else {
+                    Write-Error "Device '$DeviceName' was NOT edited for site '$SiteName' -> error: $($jsonResult.meta.msg)"
+                }
+            } else {
+                Write-Error "No Device with ID '$DeviceID' was found in site '$SiteName'"
+            }
+
+        } catch {
+            Write-Warning "Something went wrong while editing device with ID '$DeviceID' for site $SiteName ($_)"
+        }
+        
+    }
+}
+#endregion
+
+#region Client Management
 function Get-UnifiClient {
     <#
     .SYNOPSIS
@@ -867,9 +1260,18 @@ function Get-UnifiClient {
         Gets Unifi Clients (Users, Guests)
         
         You can pipe the output from "Get-UnifiSite" to this cmdlet
+
+        This function lists all known clients by default. If you wish to only show active (currently connected) clients/users use the $Active-Switch
+
+        THe output of Active clients differs from the output of all clients.
     .EXAMPLE
         PS C:\> Get-UnifiClient -SiteName "default"
         Returns all clients from site "default"
+    .EXAMPLE
+        PS C:\> Get-UnifiClient -SiteName "default" -Active
+        Returns all currently connected clients from site "default"
+    .OUTPUTS
+        Returns JSON-Data
     #>
     [CmdletBinding()]
     [OutputType([Object])]
@@ -958,7 +1360,7 @@ function Get-UnifiClient {
                 }
             }
         } catch {
-            Write-Error "Something went wrong while fetching sites ($($_.Exception))" -ErrorAction Stop
+            Write-Error "Something went wrong while fetching clients ($($_.Exception))"
         }
     }
 }
@@ -968,18 +1370,21 @@ function Disconnect-UnifiClient {
     .SYNOPSIS
         Disconnects a unifi client device (the client will try to reconnect)
     .DESCRIPTION
-        Disconnects a unifi client device (the client will try to reconnect)
+        Disconnects a unifi client device (the client will try to reconnect). This function will ask for confirmation unless the $Force-Switch is used
 
         You can pipe the output from "Get-UnifiClient" to this cmdlet
     .EXAMPLE
         PS C:\> Get-UnifiSite "Test" | Get-UnifiDevice "iPad01" | Disconnect-UnifiClient
-        Restarts the client with the name "iPad01" in site "Test"
+        Reconnects the client with the name "iPad01" in site "Test"
     .EXAMPLE
         PS C:\> Disconnect-UnifiClient -SiteName "Test" -MAC "00:11:22:33:44:55"
-        Restarts the client with the mac "00:11:22:33:44:55" in site "Test"
+        Reconnects the client with the mac "00:11:22:33:44:55" in site "Test"
+    .OUTPUTS
+        Returns $True on Success
+        Returns $False on Failure
     #>
     [CmdletBinding()]
-    [OutputType([Object])]
+    [OutputType([boolean])]
 
     param(
         # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
@@ -1020,27 +1425,32 @@ function Disconnect-UnifiClient {
             $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/s/$($SiteName)/cmd/stamgr" -Body (@{cmd = "kick-sta"; mac = $MAC} | ConvertTo-JSON)
 
             if ($jsonResult.meta.rc -eq "ok") {
-
-                Write-Host -ForegroundColor Yellow "Client '$MAC' was kicked"
+                Write-Verbose "Client '$MAC' was disconnected"
+            } else {
+                Write-Error "Client '$MAC' was NOT disconnected"
             }
 
         } catch {
-            Write-Error "Something went wrong while fetching sites ($($_.Exception))" -ErrorAction Stop
+            Write-Error "Something went wrong while disconnecting the client with the MAC '$MAC' ($($_.Exception))" -ErrorAction Stop
         }
         
     }
 }
+#endregion
 
+#region Firewall Management
 function Get-UnifiFirewallGroup {
     <#
     .SYNOPSIS
         Lists firewall groups in a site
     .DESCRIPTION
-        TODO
+        Lists firewall groups in a site.
+        A firewall group can be a group of ports, ipv4-addresses or ipv6-addresses. This group is then used in a firewall rule
     .EXAMPLE
-        PS C:\> Get-UnifiFirewallGroup TODO
-    .EXAMPLE
-        PS C:\> TODO
+        PS C:\> Get-UnifiFirewallGroup -SiteName "default"
+        Lists the firewall groups for the default site
+    .OUTPUTS
+        Returns JSON-Data
     #>
     [CmdletBinding()]
     [OutputType([Object])]
@@ -1072,14 +1482,11 @@ function Get-UnifiFirewallGroup {
                                                         @{N="GroupName";E={$_.name}},
                                                         @{N="GroupMembers";E={$_.group_members}},
                                                         @{N="GroupType";E={$_.group_type}}
-
                 }
             }
-
         } catch {
-            Write-Warning "Something went wrong while creating a new firewall group for site $($site.friendlyName) ($_)"
-        }
-        
+            Write-Warning "Something went wrong while fetching firewall groups for site $($SiteName) ($_)"
+        }        
     }
 }
 
@@ -1088,11 +1495,18 @@ function New-UnifiFirewallGroup {
     .SYNOPSIS
         Creates a new firewall group in a site
     .DESCRIPTION
-        TODO
+        Creates a new firewall group in a site
+
+        Ports can be separated by a comma (20,21,22) and/or specified as a range (5900-5910)
+        IP-Address can also be separated by a comma and/or specified as a network address (10.0.0.0/8)
     .EXAMPLE
-        PS C:\> New-UnifiFirewallGroup TODO
+        PS C:\> New-UnifiFirewallGroup -SiteName "default" -GroupName "FTP-Ports" -GroupMembers 20,21 -GroupType port-group
+        Creates the firewall group "FTP-Ports" in the default site as a "port-group" and assigns the ports 20&21 to it
     .EXAMPLE
-        PS C:\> TODO
+        PS C:\> Get-UnifiSite -SiteName "Production" | New-UnifiFirewallGroup -GroupName "Internal Networks" -GroupType "address-group" -GroupMembers "192.168.0.0/24","192.168.100.0/24"
+        Creates the firewall group "Internal Networks" in the "Production" site as an "address-group" and assigns the networks 192.168.0.0/24 and 192.168.100.0/24 to it
+    .OUTPUTS
+        Returns JSON-Data for the newly created object
     #>
     [CmdletBinding()]
     [OutputType([Object])]
@@ -1144,7 +1558,7 @@ function New-UnifiFirewallGroup {
             $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/s/$($SiteName)/rest/firewallgroup" -Body $Body
 
             if ($jsonResult.meta.rc -eq "ok") {
-                Write-Verbose "Firewall group $GroupName successfully created for site $SiteName"
+                Write-Verbose "Firewall group '$GroupName' successfully created for site '$SiteName'"
 
                 if ($Raw) {
                     $jsonResult.data
@@ -1159,29 +1573,33 @@ function New-UnifiFirewallGroup {
                 }
             } else {
                 if ($jsonResult.meta.msg -eq "api.err.FirewallGroupExisted") {
-                    Write-Warning "Firewall group $GroupName already exists in site ($SiteName)"
+                    Write-Warning "Firewall group '$GroupName' already exists in site '$SiteName'"
                 } else {
-                    Write-Error "Firewall group $GroupName was NOT created for site ($SiteName)"
+                    Write-Error "Firewall group '$GroupName' was NOT created for site '$SiteName'"
                 }
             }
 
         } catch {
-            Write-Warning "Something went wrong while creating a new firewall group for site $($site.friendlyName) ($_)"
+            Write-Warning "Something went wrong while creating a new firewall group for site $($SiteName) ($_)"
         }
-        
     }
 }
 
 function Edit-UnifiFirewallGroup {
     <#
     .SYNOPSIS
-        Edits a firewall group in a site
+        Edits a firewall group for a site
     .DESCRIPTION
-        TODO
+        Edits a firewall group for a site
+
+        You can only change the name and the members of the firewall group, but you cannot change the group-type
+
+        Leave the name or the members empty to keep them
     .EXAMPLE
-        PS C:\> Edit-UnifiFirewallGroup TODO
-    .EXAMPLE
-        PS C:\> TODO
+        PS C:\> Get-UnifiSite "default" | Get-UnifiFirewallGroup -GroupName "FTP-Ports" | Edit-UnifiFirewallGroup -GroupName "RDP-Ports" -GroupMembers 3389
+        Changes the name and the ports of the firewall group "FTP-Ports" in the default site
+    .OUTPUTS
+        Returns JSON-Data
     #>
     [CmdletBinding()]
     [OutputType([Object])]
@@ -1215,7 +1633,7 @@ function Edit-UnifiFirewallGroup {
         [string]
         $GroupName,
 
-        # Group members (can be ipv4/ipv6 addresses or port numbers/ranges). Can also be empty. Will be overridden
+        # Group members (can be ipv4/ipv6 addresses or port numbers/ranges). Can also be empty. All members will be overridden by this parameter
         [Parameter(
             Mandatory = $false
         )]
@@ -1230,45 +1648,53 @@ function Edit-UnifiFirewallGroup {
 
             if ($fwGroup) {
 
-                # Use current name if no new name was given
-                if ([String]::IsNullOrWhiteSpace($GroupName)) {
-                    $GroupName = $fwGroup.GroupName
-                }
-
-                $Body = @{
-                    '_id' = $fwGroup.GroupID
-                    'site_id' = $fwGroup.SiteID
-                    name = $GroupName
-                    group_type = $fwGroup.GroupType
-                    group_members = $GroupMembers
-                } | ConvertTo-Json
-                
-                $jsonResult = Invoke-UnifiRestCall -Method PUT -Route "api/s/$($siteName)/rest/firewallgroup/$($fwGroup.GroupID)" -Body $Body
-
-                if ($jsonResult.meta.rc -eq "ok") {
-                    Write-Verbose "Firewall group $GroupName successfully edited for site $SiteName"
-                    
-                    if ($Raw) {
-                        $jsonResult.data
-                    } else {
-                        $jsonResult.data | Select-Object    @{N="SiteName";E={$SiteName}},
-                                                            @{N="SiteID";E={$_.site_id}},
-                                                            @{N="GroupID";E={$_._id}},
-                                                            @{N="GroupName";E={$_.name}},
-                                                            @{N="GroupMembers";E={$_.group_members}},
-                                                            @{N="GroupType";E={$_.group_type}}
-                    }
+                if ( $GroupName -eq $fwGroup.GroupName -and $GroupMembers -eq $fwGroup.GroupMembers) {
+                    Write-Warning "Nothing has changed"
                 } else {
-                    Write-Error "Firewall group $GroupName was NOT edited for site $SiteName -> error: $($jsonResult.meta.msg)"
+                    # Use current name if no new name was given
+                    if ([String]::IsNullOrWhiteSpace($GroupName)) {
+                        $GroupName = $fwGroup.GroupName
+                    }
+
+                    # Use current members if no new members were given
+                    if ([String]::IsNullOrWhiteSpace($GroupMembers)) {
+                        $GroupMembers = $fwGroup.GroupMembers
+                    }
+
+                    $Body = @{
+                        '_id' = $fwGroup.GroupID
+                        'site_id' = $fwGroup.SiteID
+                        name = $GroupName
+                        group_type = $fwGroup.GroupType
+                        group_members = @($GroupMembers)
+                    } | ConvertTo-Json
+                    
+                    $jsonResult = Invoke-UnifiRestCall -Method PUT -Route "api/s/$($siteName)/rest/firewallgroup/$($fwGroup.GroupID)" -Body $Body
+
+                    if ($jsonResult.meta.rc -eq "ok") {
+                        Write-Verbose "Firewall group '$GroupName' successfully edited for site '$SiteName'"
+                        
+                        if ($Raw) {
+                            $jsonResult.data
+                        } else {
+                            $jsonResult.data | Select-Object    @{N="SiteName";E={$SiteName}},
+                                                                @{N="SiteID";E={$_.site_id}},
+                                                                @{N="GroupID";E={$_._id}},
+                                                                @{N="GroupName";E={$_.name}},
+                                                                @{N="GroupMembers";E={$_.group_members}},
+                                                                @{N="GroupType";E={$_.group_type}}
+                        }
+                    } else {
+                        Write-Error "Firewall group '$GroupName' was NOT edited for site '$SiteName' -> error: $($jsonResult.meta.msg)"
+                    }
                 }
             } else {
-                Write-Error "No Firewall Group with ID $GroupID in site $SiteName was found"
+                Write-Error "No Firewall Group with ID '$GroupID' in site '$SiteName' was found"
             }
 
         } catch {
-            Write-Warning "Something went wrong while creating a new firewall group for site $SiteName ($_)"
-        }
-        
+            Write-Warning "Something went wrong while editing firewall group with ID '$GroupID' for site $SiteName ($_)"
+        }        
     }
 }
 
@@ -1277,14 +1703,16 @@ function Remove-UnifiFirewallGroup {
     .SYNOPSIS
         Deletes a firewall group in a site
     .DESCRIPTION
-        TODO
+        Deletes a firewall group in a site and asks for confirmation
     .EXAMPLE
-        PS C:\> Remove-UnifiFirewallGroup TODO
-    .EXAMPLE
-        PS C:\> TODO
+        PS C:\> Get-UnifiSite "default" | Get-UnifiFirewallGroup -GroupName "FTP-Ports" | Remove-UnifiFirewallGroup -Force
+        Removes the firewall group "FTP-Ports" in the "default" site and skips confirmation
+    .OUTPUTS
+        Returns $True on Success
+        Returns $False on Failure
     #>
     [CmdletBinding()]
-    [OutputType([Object])]
+    [OutputType([Boolean])]
 
     param(
         # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
@@ -1319,7 +1747,7 @@ function Remove-UnifiFirewallGroup {
 
                     if ($answer -eq "" -or $answer -eq "n") {
                         Write-Verbose "Deletion of firewall group '$($fwGroup.GroupName)' (ID: $($GroupID)) was aborted by user"
-                        return $null
+                        return $False
                     }
 
                 }
@@ -1327,17 +1755,20 @@ function Remove-UnifiFirewallGroup {
 
                 if ($jsonResult.meta.rc -eq "ok") {
                     Write-Verbose "Firewall group '$($fwGroup.GroupName)' successfully deleted for site $SiteName"
+                    return $True
                 } else {
                     Write-Error "Firewall group '$($fwGroup.GroupName)' was NOT deleted for site $SiteName"
+                    return $False
                 }
             } else {
-                Write-Error "No Firewall Group with $GroupID was found in site $SiteName"
+                Write-Error "No Firewall Group with '$GroupID' was found in site '$SiteName'"
+                return $False
             }
 
         } catch {
-            Write-Warning "Something went wrong while creating a new firewall group for site $($site.friendlyName) ($_)"
-        }
-        
+            Write-Warning "Something went wrong while deleting the firewall group with ID '$GroupID' for site $($SiteName) ($_)"
+            return $False
+        }        
     }
 }
 
@@ -1346,11 +1777,12 @@ function Get-UnifiFirewallRule {
     .SYNOPSIS
         Lists firewall rules in a site
     .DESCRIPTION
-        TODO
+        Lists firewall rules in a site
     .EXAMPLE
-        PS C:\> Get-UnifiFirewallRule TODO
-    .EXAMPLE
-        PS C:\> TODO
+        PS C:\> Get-UnifiSite "default" | Get-UnifiFirewallRule
+        Lists all rules in the default site
+    .OUTPUTS
+        Returns JSON-Data
     #>
     [CmdletBinding()]
     [OutputType([Object])]
@@ -1407,22 +1839,23 @@ function Get-UnifiFirewallRule {
             }
 
         } catch {
-            Write-Warning "Something went wrong while creating a new firewall group for site $($SiteName) ($_)"
+            Write-Warning "Something went wrong while fetching firewall rules for site $($SiteName) ($_)"
         }
-        
     }
 }
 
 function New-UnifiFirewallRule {
     <#
     .SYNOPSIS
-        Creates a new firewall group in a site
+        Creates a new firewall rule for a site
     .DESCRIPTION
-        TODO
+        Creates a new firewall rule for a site
     .EXAMPLE
-        PS C:\> New-UnifiFirewallGroup TODO
-    .EXAMPLE
-        PS C:\> TODO
+        PS C:\> $RDPGroup = Get-UnifiSite "default" | Get-UnifiFirewallGroup | Where-Object { $_.GroupName -eq "RDP-Ports" }
+        PS C:\> Get-UnifiSite "default" | New-UnifiFirewallRule -RuleName "Allow RDP-Traffic" -RuleSet WAN_IN -Action Accept -Enabled $True -Protocol tcp_udp -DestinationFirewallGroupIDs $RDPGroup.GroupID
+        Allow RDP-Traffic in default site for ruleset WAN_IN
+    .OUTPUTS
+        Returns JSON-Data
     #>
     [CmdletBinding()]
     [OutputType([Object])]
@@ -1483,7 +1916,7 @@ function New-UnifiFirewallRule {
         [string]
         $Protocol = "all",
 
-        # Should be logged o a syslog server?
+        # Should be logged to a syslog server?
         [Parameter(
             Mandatory = $false
         )]
@@ -1612,7 +2045,6 @@ function New-UnifiFirewallRule {
             $RuleIndexNr = $RuleIndex
         }
 
-
         if ($RuleIndexNr -le 0) {
             Write-Error "Firewall Rule Index can't be zero or negative"
             return ""
@@ -1684,17 +2116,12 @@ function New-UnifiFirewallRule {
                                                         @{N="SettingPreference";E={$_.setting_preference}}
                 }
             } else {
-                if ($jsonResult.meta.msg -eq "api.err.FirewallGroupExisted") {
-                    Write-Warning "Firewall rule '$RuleName' already exists in site $SiteName"
-                } else {
-                    Write-Error "Firewall rule '$RuleName' was NOT created for site $SiteName"
-                }
+                Write-Error "Firewall rule '$RuleName' was NOT created for site '$SiteName'"
             }
 
         } catch {
-            Write-Warning "Something went wrong while creating a new firewall group for site $($site.friendlyName) ($_)"
-        }
-        
+            Write-Warning "Something went wrong while creating a new firewall rule for site $($SiteName) ($_)"
+        }        
     }
 }
 
@@ -1770,7 +2197,7 @@ function Edit-UnifiFirewallRule {
         )]
         [ValidateSet("all","tcp","udp","tcp_udp","icmp")] # Protocol can also be specified by an integer, but this is not implemented here yet
         [string]
-        $Protocol = "all",
+        $Protocol,
 
         # Should be logged o a syslog server?
         [Parameter(
@@ -1784,28 +2211,28 @@ function Edit-UnifiFirewallRule {
             Mandatory = $false
         )]
         [switch]
-        $StateNew = $false,
+        $StateNew,
 
         # Match established Packages?
         [Parameter(
             Mandatory = $false
         )]
         [switch]
-        $StateEstablished = $false,
+        $StateEstablished,
 
         # Match invalid Packages?
         [Parameter(
             Mandatory = $false
         )]
         [switch]
-        $StateInvalid = $false,
+        $StateInvalid,
 
         # Match related Packages?
         [Parameter(
             Mandatory = $false
         )]
         [switch]
-        $StateRelated = $false,
+        $StateRelated,
 
         # Match IPSEC Packages?
         [Parameter(
@@ -1813,7 +2240,7 @@ function Edit-UnifiFirewallRule {
         )]
         [ValidateSet("","match-ipsec","none")]
         [string]
-        $IPSEC = "",
+        $IPSEC,
 
         # Source Type
         [Parameter(
@@ -1821,21 +2248,21 @@ function Edit-UnifiFirewallRule {
         )]
         [ValidateSet("NETv4","ADDRv4")] # Netv4 = "Address/Port-Group" in WebUI, needs Parameter "SourceFirewallGroupID" or leave empty for no source filtering; ADDRv4 = "Network" or "IP Address" in WebUI
         [string]
-        $SourceType = "NETv4",
+        $SourceType,
 
         # Source Firewall Groups, must be used with $SourceType = NETv4
         [Parameter(
             Mandatory = $false
         )]
         [string[]]
-        $SourceFirewallGroupIDs = @(),
+        $SourceFirewallGroupIDs,
 
         # Source Network ID, must be used with $SourceType = ADDRv4
         [Parameter(
             Mandatory = $false
         )]
         [string]
-        $SourceNetworkID = "",
+        $SourceNetworkID,
 
         # Source Address, must be used with $SourceType = ADDRv4
         [Parameter(
@@ -1850,21 +2277,21 @@ function Edit-UnifiFirewallRule {
         )]
         [ValidateSet("NETv4","ADDRv4")] # Netv4 = "Address/Port-Group" in WebUI, needs Parameter "SourceFirewallGroupID" or leave empty for no source filtering; ADDRv4 = "Network" or "IP Address" in WebUI
         [string]
-        $DestinationType = "NETv4",
+        $DestinationType,
 
         # Destination Firewall Groups, must be used with $DestinationType = NETv4
         [Parameter(
             Mandatory = $false
         )]
         [string[]]
-        $DestinationFirewallGroupIDs = @(),
+        $DestinationFirewallGroupIDs,
 
         # Destination Network ID, must be used with $DestinationType = ADDRv4
         [Parameter(
             Mandatory = $false
         )]
         [string]
-        $DestinationNetworkID = "",
+        $DestinationNetworkID,
 
         # Destination Address, must be used with $DestinationType = ADDRv4
         [Parameter(
@@ -1878,78 +2305,147 @@ function Edit-UnifiFirewallRule {
             Mandatory = $false
         )]
         [string]
-        $RuleIndex = "append"
+        $RuleIndex
 
         # missing parameters by now: icmp_typename, src_mac_address, dst_mac_address, setting_preference, protocol_match_excepted
     )
    
     process {
-        Write-Warning "This cmdlet does not work at the moment due to 'invalidpayload' errors"
         try {
             $fwRule = Get-UnifiFirewallRule -SiteName $SiteName | Where-Object { $_.RuleID -eq $RuleID }
 
             if ($fwRule) {
 
-                # Use current name if no new name was given
-                if ([String]::IsNullOrWhiteSpace($RuleName)) {
-                    $RuleName = $fwRule.RuleName
+                $Body = @{}
+                # Only add parameters which were given to the Rest-Body
+                if ($PSBoundParameters.ContainsKey('RuleName')) {
+                    $Body.name = $RuleName
                 }
 
-                # Use current destination group IDs if no ones were given
-                if ([String]::IsNullOrWhiteSpace($DestinationFirewallGroupIDs)) {
-                    $DestinationFirewallGroupIDs = $fwRule.DstFirewallGroupIDs
+                if ($PSBoundParameters.ContainsKey('RuleSet')) {
+                    $Body.ruleset = $RuleSet
                 }
 
-                $Body = @{
-                    "_id"                   = $fwRule.RuleID
-                    action                  = $Action.ToLower()
-                    dst_address             = $DestinationAddress           # only when $DestinationType -eq ADDRv4
-                    dst_firewallgroup_ids   = $DestinationFirewallGroupIDs  # only when $DestinationType -eq NETv4
-                    dst_networkconf_id      = $DestinationNetworkID        # only when $DestinationType -eq ADDRv4
-                    dst_networkconf_type    = $DestinationType
-                    enabled                 = $Enabled
-                    icmp_typename           = ""
-                    ipsec                   = $IPSEC
-                    logging                 = $Logging.IsPresent
-                    name                    = $RuleName
-                    protocol                = $Protocol.ToLower()
-                    protocol_match_excepted = $False
-                    rule_index              = $RuleIndexNr
-                    ruleset                 = $RuleSet
-                    src_address             = $SourceAddress                # only when $DestinationType -eq ADDRv4
-                    src_firewallgroup_ids   = $SourceFirewallGroupIDs       # only when $DestinationType -eq NETv4
-                    src_mac_address         = ""
-                    src_networkconf_id      = $SourceNetworkID             # only when $DestinationType -eq ADDRv4
-                    src_networkconf_type    = $SourceType
-                    state_established       = $StateEstablished.IsPresent
-                    state_invalid           = $StateInvalid.IsPresent
-                    state_new               = $StateNew.IsPresent
-                    state_related           = $StateRelated.IsPresent
-                    site_id                 = $fwRule.SiteID
-                    setting_preference      = "manual"
-                } | ConvertTo-Json
+                if ($PSBoundParameters.ContainsKey('Action')) {
+                    $Body.action = $Action.ToLower()
+                }
+
+                if ($PSBoundParameters.ContainsKey('Enabled')) {
+                    $Body.enabled = $Enabled
+                }
+
+                if ($PSBoundParameters.ContainsKey('Protocol')) {
+                    $Body.protocol = $Protocol.ToLower()
+                }
+
+                if ($PSBoundParameters.ContainsKey('Logging')) {
+                    $Body.logging = $Logging.IsPresent
+                }
+
+                if ($PSBoundParameters.ContainsKey('StateNew')) {
+                    $Body.state_new = $StateNew.IsPresent
+                }
+
+                if ($PSBoundParameters.ContainsKey('StateEstablished')) {
+                    $Body.state_established = $StateEstablished.IsPresent
+                }
+
+                if ($PSBoundParameters.ContainsKey('StateInvalid')) {
+                    $Body.state_invalid = $StateInvalid.IsPresent
+                }
+                
+                if ($PSBoundParameters.ContainsKey('StateRelated')) {
+                    $Body.state_related = $StateRelated.IsPresent
+                }
+
+                if ($PSBoundParameters.ContainsKey('IPSEC')) {
+                    $Body.ipsec = $IPSEC
+                }
+
+                if ($PSBoundParameters.ContainsKey('SourceType')) {
+                    $Body.src_networkconf_type = $SourceType
+                }
+
+                if ($PSBoundParameters.ContainsKey('SourceFirewallGroupIDs')) {
+                    $Body.src_firewallgroup_ids = $SourceFirewallGroupIDs
+                }
+
+                if ($PSBoundParameters.ContainsKey('SourceNetworkID')) {
+                    $Body.src_networkconf_id = $SourceNetworkID
+                }
+
+                if ($PSBoundParameters.ContainsKey('SourceAddress')) {
+                    $Body.src_address = $SourceAddress
+                }
+
+                if ($PSBoundParameters.ContainsKey('DestinationType')) {
+                    $Body.dst_networkconf_type = $DestinationType
+                }
+
+                if ($PSBoundParameters.ContainsKey('DestinationFirewallGroupIDs')) {
+                    $Body.dst_firewallgroup_ids = $DestinationFirewallGroupIDs
+                }
+
+                if ($PSBoundParameters.ContainsKey('DestinationNetworkID')) {
+                    $Body.dst_networkconf_id = $DestinationNetworkID
+                }
+
+                if ($PSBoundParameters.ContainsKey('DestinationAddress')) {
+                    $Body.dst_address = $DestinationAddress
+                }
+
+                if ($PSBoundParameters.ContainsKey('RuleIndex')) {
+                    $Body.rule_index = $RuleIndex
+                }
+
+                $Body = $Body | ConvertTo-Json
                 
                 $jsonResult = Invoke-UnifiRestCall -Method PUT -Route "api/s/$($SiteName)/rest/firewallrule/$($fwRule.RuleID)" -Body $Body
 
                 if ($jsonResult.meta.rc -eq "ok") {
-                    Write-Verbose "Firewall group $GroupName successfully edited for site $SiteName"
+                    Write-Verbose "Firewall rule '$($fwRule.RuleName)' successfully edited for site '$SiteName'"
                     
                     if ($Raw) {
                         $jsonResult.data
                     } else {
-                        $jsonResult.data #  TODO
+                        $jsonResult.data | Select-Object    @{N="SiteName";E={$SiteName}},
+                                                        @{N="SiteID";E={$_.site_id}},
+                                                        @{N="RuleName";E={$_.Name}},
+                                                        @{N="RuleID";E={$_._id}},
+                                                        @{N="RuleSet";E={$_.ruleset}},
+                                                        @{N="Enabled";E={$_.enabled}},
+                                                        @{N="Action";E={$_.action}},
+                                                        @{N="DstAddress";E={$_.dst_address}},
+                                                        @{N="DstFirewallGroupIDs";E={$_.dst_firewallgroup_ids}},
+                                                        @{N="DstNetworkConfID";E={$_.dst_networkconf_id}},
+                                                        @{N="DstNetworkConfType";E={$_.dst_networkconf_type}},
+                                                        @{N="IcmpTypename";E={$_.icmp_typename}},
+                                                        @{N="IPSEC";E={$_.ipsec}},
+                                                        @{N="Logging";E={$_.logging}},
+                                                        @{N="Protocol";E={$_.protocol}},
+                                                        @{N="ProtocolMatchExcepted";E={$_.protocol_match_excepted}},
+                                                        @{N="RuleIndex";E={$_.rule_index}},
+                                                        @{N="SrcAddress";E={$_.src_address}},
+                                                        @{N="SrcFirewallGroupIDs";E={$_.src_firewallgroup_ids}},
+                                                        @{N="SrcMACAddress";E={$_.src_mac_address}},
+                                                        @{N="SrcNetworkConfID";E={$_.src_networkconf_id}},
+                                                        @{N="SrcNetworkConfType";E={$_.src_networkconf_type}},
+                                                        @{N="StateEstablished";E={$_.state_established}},
+                                                        @{N="StateInvalid";E={$_.state_invalid}},
+                                                        @{N="StateNew";E={$_.state_new}},
+                                                        @{N="StateRelated";E={$_.state_related}},
+                                                        @{N="SettingPreference";E={$_.setting_preference}}
                     }
                 } else {
-                    Write-Error "Firewall group $GroupName was NOT edited for site $SiteName -> error: $($jsonResult.meta.msg)"
+                    Write-Error "Firewall rule '$($fwRule.RuleName)' was NOT edited for site '$SiteName' -> error: $($jsonResult.meta.msg)"
                 }
             } else {
-                Write-Error "No Firewall Group with ID $GroupID in site $SiteName was found"
+                Write-Error "No Firewall rule with ID '$($fwRule.RuleID)' in site '$SiteName' was found"
             }
 
         } catch {
-            Write-Warning "Something went wrong while creating a new firewall group for site $SiteName ($_)"
+            Write-Warning "Something went wrong while editing firewall rule with ID '$($fwRule.RuleID)' for site '$SiteName' ($_)"
         }
-        
     }
 }
 
@@ -1958,14 +2454,16 @@ function Remove-UnifiFirewallRule {
     .SYNOPSIS
         Deletes a firewall rule in a site
     .DESCRIPTION
-        TODO
+        Deletes a firewall rule in a site and asks for confirmation
     .EXAMPLE
-        PS C:\> Remove-UnifiFirewallRule TODO
-    .EXAMPLE
-        PS C:\> TODO
+        PS C:\> Get-UnifiSite "test" | Get-UnifiFirewallRule -RuleName "Allow RDP" | Remove-UnifiFirewallRule -Force
+        Removes the firewall rule "Allow RDP" from the site "test" and does not ask for confirmation
+    .OUTPUTS
+        Returns $True on Success
+        Returns $False on Failure
     #>
     [CmdletBinding()]
-    [OutputType([Object])]
+    [OutputType([Boolean])]
 
     param(
         # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
@@ -2000,7 +2498,7 @@ function Remove-UnifiFirewallRule {
 
                     if ($answer -eq "" -or $answer -eq "n") {
                         Write-Verbose "Deletion of firewall rule '$($fwRule.RuleName)' (ID: $($RuleID)) was aborted by user"
-                        return $null
+                        return $False
                     }
 
                 }
@@ -2008,30 +2506,35 @@ function Remove-UnifiFirewallRule {
 
                 if ($jsonResult.meta.rc -eq "ok") {
                     Write-Verbose "Firewall rule '$($fwRule.RuleName)' successfully deleted for site $SiteName"
+                    return $True
                 } else {
                     Write-Error "Firewall rule '$($fwRule.RuleName)' was NOT deleted for site $SiteName"
+                    return $False
                 }
             } else {
-                Write-Error "No Firewall rule with $RuleID was found in site $SiteName"
+                Write-Error "No Firewall rule with ID '$RuleID' was found in site '$SiteName'"
+                return $False
             }
 
         } catch {
-            Write-Warning "Something went wrong while creating a new firewall rule for site $($SiteName) ($_)"
+            Write-Warning "Something went wrong while removing firewall rule with ID '$($RuleID)' for site '$($SiteName)' ($_)"
         }
-        
     }
 }
+#endregion
 
+#region Tag Management
 function Get-UnifiTag {
     <#
     .SYNOPSIS
         Gets all tags from a unifi site
     .DESCRIPTION
-        TODO
+        Gets all tags from a unifi site
     .EXAMPLE
-        PS C:\> Get-UnifiTag TODO
-    .EXAMPLE
-        PS C:\> TODO
+        PS C:\> Get-UnifiTag -SiteName "default"
+        Get all tags from the "default" site
+    .OUTPUTS
+        Returns JSON-Data
     #>
     [CmdletBinding()]
     [OutputType([Object])]
@@ -2066,22 +2569,22 @@ function Get-UnifiTag {
             }
 
         } catch {
-            Write-Warning "Something went wrong while fetching tags for site $($SiteName) ($_)"
+            Write-Warning "Something went wrong while fetching tags for site '$($SiteName)' ($_)"
         }
-        
     }
 }
 
 function New-UnifiTag {
     <#
     .SYNOPSIS
-        Creates a new firewall group in a site
+        Creates a new tag for a site
     .DESCRIPTION
-        TODO
+        Creates a new tag for a site
     .EXAMPLE
-        PS C:\> New-UnifiFirewallGroup TODO
-    .EXAMPLE
-        PS C:\> TODO
+        PS C:\> New-UnifiTag -SiteName "default" -TagName "Building-A" -TagMembers "00:11:22:33:44:55","66:77:88:99:AA:BB:CC"
+        Creates the new Tag "Building-A" in the "default" site and assigns the Devices with the macs "00:11:22:33:44:55","66:77:88:99:AA:BB:CC" to it
+    .OUTPUTS
+        Returns JSON data
     #>
     [CmdletBinding()]
     [OutputType([Object])]
@@ -2124,7 +2627,7 @@ function New-UnifiTag {
             $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/s/$($SiteName)/rest/tag" -Body $Body
 
             if ($jsonResult.meta.rc -eq "ok") {
-                Write-Verbose "Tag '$TagName' successfully created for site $SiteName"
+                Write-Verbose "Tag '$TagName' successfully created for site '$SiteName'"
 
                 if ($Raw) {
                     $jsonResult.data
@@ -2136,13 +2639,12 @@ function New-UnifiTag {
                                                         @{N="TagMembers";E={$_.member_table}}
                 }
             } else {
-                Write-Error "Tag '$TagName' was NOT created for site ($SiteName)"
+                Write-Error "Tag '$TagName' was NOT created for site '$SiteName')'"
             }
 
         } catch {
-            Write-Warning "Something went wrong while creating a new tag for site $($SiteName) ($_)"
-        }
-        
+            Write-Warning "Something went wrong while creating a new tag for site '$($SiteName)' ($_)"
+        }        
     }
 }
 
@@ -2151,11 +2653,16 @@ function Edit-UnifiTag {
     .SYNOPSIS
         Edits a tag in a site
     .DESCRIPTION
-        TODO
+        Edits a tag in a site
+        You can control what should happen with $TagMembers by specifying the $Mode-Parameter
+        $Mode = "Add" -> Add given Members to current TagMembers. This is the default
+        $Mode = "Replace" -> Replace given members with current TagMembers
+        $Mode = "Remove" -> Remove given members from current TagMembers (TODO: not implemented yet)
     .EXAMPLE
-        PS C:\> Edit-UnifiTag TODO
-    .EXAMPLE
-        PS C:\> TODO
+        PS C:\> Get-UnifiTag -SiteName "default" | Where-Object { $_.TagName -eq "Building-A" } | Edit-UnifiTag -GroupMembers "00:11:22:33:44:55","66:77:88:99:AA:BB:CC" -Mode Replace
+        Edits the tag "Building-A" in the "default" site and replaces the members with "00:11:22:33:44:55","66:77:88:99:AA:BB:CC"
+    .OUTPUTS
+        Returns JSON-data
     #>
     [CmdletBinding()]
     [OutputType([Object])]
@@ -2218,7 +2725,7 @@ function Edit-UnifiTag {
                 } else {
                     switch ($Mode) { # depending on the mode decide how to update the member table if $TagMembers has content
                         "Replace" {
-                            $TagMembers = $TagMembers # nonsense, but it helps understand the process
+                            $TagMembers = $TagMembers # nonsense, but it helps to understand the process
                         }
 
                         "Add" {
@@ -2258,11 +2765,11 @@ function Edit-UnifiTag {
                     Write-Error "Tag '$TagName' was NOT edited for site $SiteName -> error: $($jsonResult.meta.msg)"
                 }
             } else {
-                Write-Error "No tag with ID $TagID in site $SiteName was found"
+                Write-Error "No tag with ID '$TagID' in site '$SiteName' was found"
             }
 
         } catch {
-            Write-Warning "Something went wrong while editing a tag for site $SiteName ($_)"
+            Write-Warning "Something went wrong while editing a tag for site '$SiteName' ($_)"
         }
         
     }
@@ -2273,14 +2780,16 @@ function Remove-UnifiTag {
     .SYNOPSIS
         Removes a tag from a site
     .DESCRIPTION
-        TODO
+        Removes a tag from a site and asks for confirmation
     .EXAMPLE
-        PS C:\> Remove-UnifiTag TODO
-    .EXAMPLE
-        PS C:\> TODO
+        PS C:\> Get-UnifiTag -SiteName "default" | Where-Object { $_.TagName -eq "Building-A" } | Remove-UnifiTag -Force
+        Removes the tag "Building-A" from the "default" site and skips confirmation
+    .OUTPUTS
+        Returns $True on Success
+        Returns $False on Failure
     #>
     [CmdletBinding()]
-    [OutputType([Object])]
+    [OutputType([Boolean])]
 
     param(
         # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
@@ -2315,7 +2824,7 @@ function Remove-UnifiTag {
 
                     if ($answer -eq "" -or $answer -eq "n") {
                         Write-Verbose "Deletion of tag '$($Tag.TagName)' (ID: $($TagID)) was aborted by user"
-                        return $null
+                        return $False
                     }
 
                 }
@@ -2323,16 +2832,20 @@ function Remove-UnifiTag {
 
                 if ($jsonResult.meta.rc -eq "ok") {
                     Write-Verbose "Tag '$($Tag.TagName)' successfully deleted for site $SiteName"
+                    return $True
                 } else {
                     Write-Error "Tag '$($Tag.TagName)' was NOT deleted for site $SiteName"
+                    return $False
                 }
             } else {
                 Write-Error "No Tag with ID '$TagID' was found in site $SiteName"
+                return $False
             }
 
         } catch {
             Write-Warning "Something went wrong while deleting a a tag from site $($SiteName) ($_)"
+            return $False
         }
-        
     }
 }
+#endregion
