@@ -94,6 +94,18 @@ Force-Provision a device:
 
 `Sync-UnifiDevice -SiteName <SiteName> -MAC <Device MAC>`
 
+Update a devices firmware
+
+`Update-UnifiDevice -SiteName <SiteName> -MAC <Device MAC>`
+
+Update a devices firmware and wait for completion
+
+`Update-UnifiDevice -SiteName <SiteName> -MAC <Device MAC> -Wait`
+
+Update a devices firmware with a custom firmware path (or even downgrade a device)
+
+`Update-UnifiDevice -SiteName <SiteName> -MAC <Device MAC> -URL <firmware link as http/https/ftp url>`
+
 ### Clients
 
 *Clients are devices which are or were connected to a UniFi device, like a wifi client*
@@ -175,13 +187,12 @@ Delete firewall rule:
 * [ ] Review error-messages
 
 More functions will follow, for example:
-* [x] creating sites
-* [x] removing sites
+* [x] creating sites -> `New-UnifiSite`
+* [x] removing sites -> `Remove-UnifiSite`
 * [ ] editing site-settings
 * [ ] blocking clients
-* [ ] update firmware devices
-* [ ] downgrade devices
-* [ ] forget (remove) devices#
+* [x] update/downgrade devices -> `Update-UnifiDevice`
+* [ ] forget (remove) devices
 * [ ] create networks
 * [ ] create wireless networks
 * [ ] control guest profiles
