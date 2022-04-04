@@ -953,11 +953,14 @@ function Get-UnifiAlarm {
 
 #region Device Management
 <#  FYI: device states:
+    0: disconnected
     1: connected
-    2: ?
+    2: pending adoption
     3: ?
     4: updating
     5: provisioning
+    6: ?
+    7: adopting
     ?: ?
 #>
 function Get-UnifiDevice {
@@ -1013,18 +1016,21 @@ function Get-UnifiDevice {
                                                         Serial,
                                                         Version,
                                                         @{N="State";E={
-                                                            $upgradestate = $_.upgrade_state
+                                                            $devicedata = $_
                                                             switch($_.state) {
+                                                                0 { "Disconnected" }
                                                                 1 { "Connected" }
+                                                                2 { "Pending adoption"}
                                                                 4 { 
-                                                                    switch ($upgradestate) {
+                                                                    switch ($devicedata.upgrade_state) {
                                                                         3 { "Updating (Downloading)" }
                                                                         5 { "Updating (Writing)" }
                                                                         default { "Updating" }
                                                                     }
                                                                 }
                                                                 5 { "Provisioning" }
-                                                                default { $_.state }
+                                                                7 { "Adopting" }
+                                                                default { $devicedata.state }
                                                             }
                                                         }},
                                                         @{N="Connected";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.connected_at) }},
@@ -1301,6 +1307,301 @@ function Update-UnifiDevice {
             Write-Error "Something went wrong while doing a firmware update for Device with MAC '$MAC' ($($_.Exception))" -ErrorAction Stop
             return $False
         }        
+    }
+}
+
+function Register-UnifiDevice {
+    <#
+    .SYNOPSIS
+        Registers (adopts) a unifi device to the unifi controller
+    .DESCRIPTION
+        Registers (adopts) a unifi device to the unifi controller
+
+        You can pipe the output from "Get-UnifiDevice" to this cmdlet
+    .EXAMPLE
+        PS C:\> Get-UnifiSite "Test" | Get-UnifiDevice | Where-Object { $_.State -eq "Pending Adoption" } | Register-UnifiDevice
+        Adopts all devices which can be adopted in site "Test"
+    .EXAMPLE
+        PS C:\> Register-UnifiDevice -SiteName "Test" -MAC "00:11:22:33:44:55"
+        Adopts the device with the mac "00:11:22:33:44:55" in site "Test"
+    .OUTPUTS
+        Returns $True on Success
+        Returns $False on Failure
+    #>
+    [CmdletBinding()]
+    [OutputType([Object])]
+
+    param(
+        # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
+        [String]
+        $SiteName,
+
+        # MAC of the device to register (adopt)
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
+        [String]
+        $MAC
+    )
+   
+    process {
+        
+        try {
+            $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/s/$($SiteName)/cmd/devmgr" -Body (@{cmd = "adopt"; mac = $MAC} | ConvertTo-JSON)
+
+            if ($jsonResult.meta.rc -eq "ok") {
+                Write-Verbose "Device with '$MAC' was adopted."
+                return $True
+            } else {
+                Write-Error "Could not adopt device with MAC '$MAC'"
+                return $False
+            }
+
+        } catch {
+            Write-Error "Something went wrong while adopting device with MAC '$MAC' ($($_.Exception))" -ErrorAction Stop
+        }
+        
+    }
+}
+
+function Unregister-UnifiDevice {
+    <#
+    .SYNOPSIS
+        Unregisters (forgets) a unifi device from the unifi controller
+    .DESCRIPTION
+        Unregisters (forgets) a unifi device from the unifi controller
+
+        You can pipe the output from "Get-UnifiDevice" to this cmdlet
+    .EXAMPLE
+        PS C:\> Get-UnifiSite "Test" | Get-UnifiDevice | Where-Object { $_.State -eq "Disconnected" } | Unregister-UnifiDevice
+        Forgets all devices which are disconnected in site "Test"
+    .EXAMPLE
+        PS C:\> Unregister-UnifiDevice -SiteName "Test" -MAC "00:11:22:33:44:55" -Force
+        Forgets the device with the mac "00:11:22:33:44:55" in site "Test" and does not ask for confirmation
+    .OUTPUTS
+        Returns JSON-data
+    #>
+    [CmdletBinding()]
+    [OutputType([Object])]
+
+    param(
+        # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
+        [String]
+        $SiteName,
+
+        # MAC of the device to unregister (forget)
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
+        [String]
+        $MAC,
+
+        # Do not filter or rename output, just sent the json result back as raw data
+        [Parameter(Mandatory = $false)]
+        [switch]
+        $Raw,
+
+        # Do not ask for confirmation
+        [Parameter(Mandatory = $false)]
+        [switch]
+        $Force
+    )
+   
+    process {
+        
+        try {
+            if (!$Force) {
+                do {
+                    $answer = Read-Host -Prompt "Do you really want to forget(delete) the device '$MAC' from site '$SiteName'? (y/N): "
+                } while($answer -ne "y" -and $answer -ne "n" -and $answer -ne "")
+
+                if ($answer -eq "" -or $answer -eq "n") {
+                    Write-Verbose "Forgetting device '$MAC' was aborted by user"
+                    return ""
+                }
+            }
+            $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/s/$($SiteName)/cmd/sitemgr" -Body (@{cmd = "delete-device"; mac = $MAC} | ConvertTo-JSON)
+
+            if ($jsonResult.meta.rc -eq "ok") {
+                Write-Verbose "Device with '$MAC' was forgotten."
+                if ($Raw) {
+                    $jsonResult.data
+                } else {
+                    $jsonResult.data | Select-Object    @{N="SiteName";E={$SiteName}},
+                                                        @{N="SiteID";E={$_.site_id}},
+                                                        Adopted,
+                                                        @{N="InformIP";E={$_.inform_ip}},
+                                                        @{N="InformURL";E={$_.inform_url}},
+                                                        IP,
+                                                        MAC,
+                                                        Model,
+                                                        @{N="Name";E={ if (!$_.name){ $_.MAC}else{$_.name} }},
+                                                        Serial,
+                                                        Version,
+                                                        @{N="State";E={
+                                                            $devicedata = $_
+                                                            switch($_.state) {
+                                                                0 { "Disconnected" }
+                                                                1 { "Connected" }
+                                                                2 { "Pending adoption"}
+                                                                4 { 
+                                                                    switch ($devicedata.upgrade_state) {
+                                                                        3 { "Updating (Downloading)" }
+                                                                        5 { "Updating (Writing)" }
+                                                                        default { "Updating" }
+                                                                    }
+                                                                }
+                                                                5 { "Provisioning" }
+                                                                7 { "Adopting" }
+                                                                default { $devicedata.state }
+                                                            }
+                                                        }},
+                                                        @{N="Connected";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.connected_at) }},
+                                                        @{N="Provisioned";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.provisioned_at) }},
+                                                        @{N="LastSeen";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.last_seen) }},
+                                                        @{N="Uptime";E={ [Timespan]::FromSeconds($_.Uptime).ToString() }},
+                                                        @{N="Startup";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.startup_timestamp) }},
+                                                        @{N="UpdateAvailable";E={ $_.upgradable }},
+                                                        @{N="UpdateableFirmware";E={ $_.upgrade_to_firmware }},
+                                                        @{N="Load1";E={ $_.sys_stats.loadavg_1 }},
+                                                        @{N="Load5";E={ $_.sys_stats.loadavg_5 }},                                                        
+                                                        @{N="Load15";E={ $_.sys_stats.loadavg_15 }},
+                                                        @{N="CPUUsed";E={ $_."system-stats".cpu }},
+                                                        @{N="MemUsed";E={ $_."system-stats".mem }}
+                }
+            } else {
+                Write-Error "Could not forget device with MAC '$MAC'"
+                return $jsonResult
+            }
+
+        } catch {
+            Write-Error "Something went wrong while forgetting device with MAC '$MAC' ($($_.Exception))" -ErrorAction Stop
+            return ""
+        }
+        
+    }
+}
+
+function Move-UnifiDevice {
+    <#
+    .SYNOPSIS
+        Moves a unifi device to another site
+    .DESCRIPTION
+        Moves a unifi device to another site
+
+        You can pipe the output from "Get-UnifiDevice" to this cmdlet
+    .EXAMPLE
+        PS C:\> Get-UnifiSite "Test" | Get-UnifiDevice | Where-Object { $_.Name -eq "AP01" } | Move-UnifiDevice -NewSiteName "oyrjfomm"
+        Moves the device with the name "AP01" from site "Test" to the site with the internal name "oyrjfomm"
+    .OUTPUTS
+        Returns JSON-data
+    #>
+    [CmdletBinding()]
+    [OutputType([Object])]
+
+    param(
+        # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
+        [String]
+        $SiteName,
+
+        # MAC of the device to sync
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
+        [String]
+        $MAC,
+
+        # Name of the new site (Unifi's internal name is used, not the name visible in the web interface)
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
+        [String]
+        $NewSiteName,
+
+        # Do not filter or rename output, just sent the json result back as raw data
+        [Parameter(Mandatory = $false)]
+        [switch]
+        $Raw,
+
+        # Do not ask for confirmation
+        [Parameter(Mandatory = $false)]
+        [switch]
+        $Force
+    )
+   
+    process {
+        
+        try {
+            $newSite = Get-UnifiSite -SiteName $NewSiteName
+            if ($newSite) {
+                if (!$Force) {
+                    do {
+                        $answer = Read-Host -Prompt "Do you really want to move the device '$MAC' from site '$SiteName' to site '$($newSite.SiteDisplayName)'? (y/N): "
+                    } while($answer -ne "y" -and $answer -ne "n" -and $answer -ne "")
+
+                    if ($answer -eq "" -or $answer -eq "n") {
+                        Write-Verbose "Moving device '$MAC' was aborted by user"
+                        return ""
+                    }
+                }
+                $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/s/$($SiteName)/cmd/sitemgr" -Body (@{cmd = "move-device"; mac = $MAC; site = $newSite.SiteID } | ConvertTo-JSON)
+
+                if ($jsonResult.meta.rc -eq "ok") {
+                    Write-Verbose "Device with '$MAC' was moved to site '$($newSite.SiteDisplayName)'."
+                    if ($Raw) {
+                        $jsonResult.data
+                    } else {
+                        $jsonResult.data | Select-Object    @{N="SiteName";E={$SiteName}},
+                                                            @{N="SiteID";E={$_.site_id}},
+                                                            Adopted,
+                                                            @{N="InformIP";E={$_.inform_ip}},
+                                                            @{N="InformURL";E={$_.inform_url}},
+                                                            IP,
+                                                            MAC,
+                                                            Model,
+                                                            @{N="Name";E={ if (!$_.name){ $_.MAC}else{$_.name} }},
+                                                            Serial,
+                                                            Version,
+                                                            @{N="State";E={
+                                                                $devicedata = $_
+                                                                switch($_.state) {
+                                                                    0 { "Disconnected" }
+                                                                    1 { "Connected" }
+                                                                    2 { "Pending adoption"}
+                                                                    4 { 
+                                                                        switch ($devicedata.upgrade_state) {
+                                                                            3 { "Updating (Downloading)" }
+                                                                            5 { "Updating (Writing)" }
+                                                                            default { "Updating" }
+                                                                        }
+                                                                    }
+                                                                    5 { "Provisioning" }
+                                                                    7 { "Adopting" }
+                                                                    default { $devicedata.state }
+                                                                }
+                                                            }},
+                                                            @{N="Connected";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.connected_at) }},
+                                                            @{N="Provisioned";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.provisioned_at) }},
+                                                            @{N="LastSeen";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.last_seen) }},
+                                                            @{N="Uptime";E={ [Timespan]::FromSeconds($_.Uptime).ToString() }},
+                                                            @{N="Startup";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.startup_timestamp) }},
+                                                            @{N="UpdateAvailable";E={ $_.upgradable }},
+                                                            @{N="UpdateableFirmware";E={ $_.upgrade_to_firmware }},
+                                                            @{N="Load1";E={ $_.sys_stats.loadavg_1 }},
+                                                            @{N="Load5";E={ $_.sys_stats.loadavg_5 }},                                                        
+                                                            @{N="Load15";E={ $_.sys_stats.loadavg_15 }},
+                                                            @{N="CPUUsed";E={ $_."system-stats".cpu }},
+                                                            @{N="MemUsed";E={ $_."system-stats".mem }}
+                    }
+                } else {
+                    Write-Error "Could not move device with MAC '$MAC'"
+                    return $jsonResult
+                }
+            } else {
+                Write-Error "There is no new site with the name '$($newSite.SiteDisplayName)'"
+                return ""
+            }
+
+        } catch {
+            Write-Error "Something went wrong while moving device with MAC '$MAC' ($($_.Exception))" -ErrorAction Stop
+            return ""
+        }
+        
     }
 }
 
