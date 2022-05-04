@@ -72,6 +72,117 @@ function Invoke-UnifiRestCall {
         }
     }
 }
+
+function Build-UnifiClientObject {
+    [CmdletBinding()]
+    param (
+        [Parameter()]
+        [Object]
+        $RawInput
+    )
+
+    process {
+        $RawInput | Select-Object @{N="SiteName";E={$SiteName}},
+                                @{N="SiteID";E={$_.site_id}},
+                                Adopted,
+                                @{N="InformIP";E={$_.inform_ip}},
+                                @{N="InformURL";E={$_.inform_url}},
+                                IP,
+                                MAC,
+                                Model,
+                                @{N="Name";E={ if (!$_.name){ $_.MAC}else{$_.name} }},
+                                Serial,
+                                Version,
+                                @{N="State";E={
+                                    $devicedata = $_
+                                    switch($_.state) {
+                                        0 { "Disconnected" }
+                                        1 { "Connected" }
+                                        2 { "Pending adoption"}
+                                        4 { 
+                                            switch ($devicedata.upgrade_state) {
+                                                3 { "Updating (Downloading)" }
+                                                5 { "Updating (Writing)" }
+                                                default { "Updating" }
+                                            }
+                                        }
+                                        5 { "Provisioning" }
+                                        7 { "Adopting" }
+                                        default { $devicedata.state }
+                                    }
+                                }},
+                                @{N="Connected";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.connected_at) }},
+                                @{N="Provisioned";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.provisioned_at) }},
+                                @{N="LastSeen";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.last_seen) }},
+                                @{N="Uptime";E={ [Timespan]::FromSeconds($_.Uptime).ToString() }},
+                                @{N="Startup";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.startup_timestamp) }},
+                                @{N="UpdateAvailable";E={ $_.upgradable }},
+                                @{N="UpdateableFirmware";E={ $_.upgrade_to_firmware }},
+                                @{N="Load1";E={ $_.sys_stats.loadavg_1 }},
+                                @{N="Load5";E={ $_.sys_stats.loadavg_5 }},                                                        
+                                @{N="Load15";E={ $_.sys_stats.loadavg_15 }},
+                                @{N="CPUUsed";E={ $_."system-stats".cpu }},
+                                @{N="MemUsed";E={ $_."system-stats".mem }}
+    }
+}
+
+function Build-UnifiWirelessNetworkObject {
+    [CmdletBinding()]
+    param (
+        [Parameter()]
+        [Object]
+        $RawInput
+    )
+
+    process {
+        $RawInput | Select-Object @{N="SiteName";E={$SiteName}},
+                                @{N="SiteID";E={$_.site_id}},
+                                Enabled,
+                                wlan_bands,
+                                @{N="SSID";E={$_.name}},
+                                @{N="Passphrase";E={ if($ShowPassphrase.IsPresent) { $_.x_passphrase } else { "<PSK_IS_HIDDEN>"} }},
+                                @{N="GuestNetwork";E={$_.is_guest}},
+                                networkconf_id,
+                                WPA3_Support,
+                                WPA3_Transition,
+                                Security,
+                                wep_idx,
+                                WPA_Mode,
+                                WPA_Enc,
+                                PMF_Mode,
+                                PMF_Cipher,
+                                usergroup_id,
+                                WLAN_Band,
+                                ap_group_ids,
+                                dtim_mode,
+                                dtim_ng,
+                                dtim_na,
+                                country_beacon,
+                                minrate_ng_enabled,
+                                minrate_ng_advertising_rates,
+                                minrate_ng_data_rate_kbps,
+                                minrate_na_enabled,
+                                minrate_na_advertising_rates,
+                                minrate_na_data_rate_kbps,
+                                MAC_filter_enabled,
+                                MAC_filter_Policy,
+                                MAC_filter_list,
+                                bc_filter_enabled,
+                                bc_filter_list,
+                                group_rekey,
+                                hotspot2conf_enabled,
+                                bss_transition,
+                                auth_cache,
+                                schedule_enabled,
+                                setting_preference,
+                                minrate_setting_preference,
+                                radius_das_enabled,
+                                iapp_enabled,
+                                x_iapp_key,
+                                dtim_6e
+    }
+}
+
 #endregion
 
 #region Authentication
@@ -1004,47 +1115,7 @@ function Get-UnifiDevice {
                 if ($Raw) {
                     $jsonResult.data
                 } else {
-                    $jsonResult.data | Select-Object    @{N="SiteName";E={$SiteName}},
-                                                        @{N="SiteID";E={$_.site_id}},
-                                                        Adopted,
-                                                        @{N="InformIP";E={$_.inform_ip}},
-                                                        @{N="InformURL";E={$_.inform_url}},
-                                                        IP,
-                                                        MAC,
-                                                        Model,
-                                                        @{N="Name";E={ if (!$_.name){ $_.MAC}else{$_.name} }},
-                                                        Serial,
-                                                        Version,
-                                                        @{N="State";E={
-                                                            $devicedata = $_
-                                                            switch($_.state) {
-                                                                0 { "Disconnected" }
-                                                                1 { "Connected" }
-                                                                2 { "Pending adoption"}
-                                                                4 { 
-                                                                    switch ($devicedata.upgrade_state) {
-                                                                        3 { "Updating (Downloading)" }
-                                                                        5 { "Updating (Writing)" }
-                                                                        default { "Updating" }
-                                                                    }
-                                                                }
-                                                                5 { "Provisioning" }
-                                                                7 { "Adopting" }
-                                                                default { $devicedata.state }
-                                                            }
-                                                        }},
-                                                        @{N="Connected";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.connected_at) }},
-                                                        @{N="Provisioned";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.provisioned_at) }},
-                                                        @{N="LastSeen";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.last_seen) }},
-                                                        @{N="Uptime";E={ [Timespan]::FromSeconds($_.Uptime).ToString() }},
-                                                        @{N="Startup";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.startup_timestamp) }},
-                                                        @{N="UpdateAvailable";E={ $_.upgradable }},
-                                                        @{N="UpdateableFirmware";E={ $_.upgrade_to_firmware }},
-                                                        @{N="Load1";E={ $_.sys_stats.loadavg_1 }},
-                                                        @{N="Load5";E={ $_.sys_stats.loadavg_5 }},                                                        
-                                                        @{N="Load15";E={ $_.sys_stats.loadavg_15 }},
-                                                        @{N="CPUUsed";E={ $_."system-stats".cpu }},
-                                                        @{N="MemUsed";E={ $_."system-stats".mem }}
+                    Build-UnifiClientObject $jsonResult.data
                 }
             }
 
@@ -1329,7 +1400,7 @@ function Register-UnifiDevice {
         Returns $False on Failure
     #>
     [CmdletBinding()]
-    [OutputType([Object])]
+    [OutputType([Boolean])]
 
     param(
         # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
@@ -1425,47 +1496,7 @@ function Unregister-UnifiDevice {
                 if ($Raw) {
                     $jsonResult.data
                 } else {
-                    $jsonResult.data | Select-Object    @{N="SiteName";E={$SiteName}},
-                                                        @{N="SiteID";E={$_.site_id}},
-                                                        Adopted,
-                                                        @{N="InformIP";E={$_.inform_ip}},
-                                                        @{N="InformURL";E={$_.inform_url}},
-                                                        IP,
-                                                        MAC,
-                                                        Model,
-                                                        @{N="Name";E={ if (!$_.name){ $_.MAC}else{$_.name} }},
-                                                        Serial,
-                                                        Version,
-                                                        @{N="State";E={
-                                                            $devicedata = $_
-                                                            switch($_.state) {
-                                                                0 { "Disconnected" }
-                                                                1 { "Connected" }
-                                                                2 { "Pending adoption"}
-                                                                4 { 
-                                                                    switch ($devicedata.upgrade_state) {
-                                                                        3 { "Updating (Downloading)" }
-                                                                        5 { "Updating (Writing)" }
-                                                                        default { "Updating" }
-                                                                    }
-                                                                }
-                                                                5 { "Provisioning" }
-                                                                7 { "Adopting" }
-                                                                default { $devicedata.state }
-                                                            }
-                                                        }},
-                                                        @{N="Connected";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.connected_at) }},
-                                                        @{N="Provisioned";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.provisioned_at) }},
-                                                        @{N="LastSeen";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.last_seen) }},
-                                                        @{N="Uptime";E={ [Timespan]::FromSeconds($_.Uptime).ToString() }},
-                                                        @{N="Startup";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.startup_timestamp) }},
-                                                        @{N="UpdateAvailable";E={ $_.upgradable }},
-                                                        @{N="UpdateableFirmware";E={ $_.upgrade_to_firmware }},
-                                                        @{N="Load1";E={ $_.sys_stats.loadavg_1 }},
-                                                        @{N="Load5";E={ $_.sys_stats.loadavg_5 }},                                                        
-                                                        @{N="Load15";E={ $_.sys_stats.loadavg_15 }},
-                                                        @{N="CPUUsed";E={ $_."system-stats".cpu }},
-                                                        @{N="MemUsed";E={ $_."system-stats".mem }}
+                    Build-UnifiClientObject $jsonResult.data
                 }
             } else {
                 Write-Error "Could not forget device with MAC '$MAC'"
@@ -1546,47 +1577,7 @@ function Move-UnifiDevice {
                     if ($Raw) {
                         $jsonResult.data
                     } else {
-                        $jsonResult.data | Select-Object    @{N="SiteName";E={$SiteName}},
-                                                            @{N="SiteID";E={$_.site_id}},
-                                                            Adopted,
-                                                            @{N="InformIP";E={$_.inform_ip}},
-                                                            @{N="InformURL";E={$_.inform_url}},
-                                                            IP,
-                                                            MAC,
-                                                            Model,
-                                                            @{N="Name";E={ if (!$_.name){ $_.MAC}else{$_.name} }},
-                                                            Serial,
-                                                            Version,
-                                                            @{N="State";E={
-                                                                $devicedata = $_
-                                                                switch($_.state) {
-                                                                    0 { "Disconnected" }
-                                                                    1 { "Connected" }
-                                                                    2 { "Pending adoption"}
-                                                                    4 { 
-                                                                        switch ($devicedata.upgrade_state) {
-                                                                            3 { "Updating (Downloading)" }
-                                                                            5 { "Updating (Writing)" }
-                                                                            default { "Updating" }
-                                                                        }
-                                                                    }
-                                                                    5 { "Provisioning" }
-                                                                    7 { "Adopting" }
-                                                                    default { $devicedata.state }
-                                                                }
-                                                            }},
-                                                            @{N="Connected";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.connected_at) }},
-                                                            @{N="Provisioned";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.provisioned_at) }},
-                                                            @{N="LastSeen";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.last_seen) }},
-                                                            @{N="Uptime";E={ [Timespan]::FromSeconds($_.Uptime).ToString() }},
-                                                            @{N="Startup";E={ (Get-Date("1970-01-01 00:00:00")).AddSeconds($_.startup_timestamp) }},
-                                                            @{N="UpdateAvailable";E={ $_.upgradable }},
-                                                            @{N="UpdateableFirmware";E={ $_.upgrade_to_firmware }},
-                                                            @{N="Load1";E={ $_.sys_stats.loadavg_1 }},
-                                                            @{N="Load5";E={ $_.sys_stats.loadavg_5 }},                                                        
-                                                            @{N="Load15";E={ $_.sys_stats.loadavg_15 }},
-                                                            @{N="CPUUsed";E={ $_."system-stats".cpu }},
-                                                            @{N="MemUsed";E={ $_."system-stats".mem }}
+                        Build-UnifiClientObject $jsonResult.data
                     }
                 } else {
                     Write-Error "Could not move device with MAC '$MAC'"
@@ -1677,12 +1668,7 @@ function Edit-UnifiDevice { # not tested yet
                     if ($Raw) {
                         $jsonResult.data
                     } else {
-                        $jsonResult.data <# | Select-Object    @{N="SiteName";E={$SiteName}},
-                                                            @{N="SiteID";E={$_.site_id}},
-                                                            @{N="GroupID";E={$_._id}},
-                                                            @{N="GroupName";E={$_.name}},
-                                                            @{N="GroupMembers";E={$_.group_members}},
-                                                            @{N="GroupType";E={$_.group_type}} #>
+                        Build-UnifiClientObject $jsonResult.data
                     }
                 } else {
                     Write-Error "Device '$DeviceName' was NOT edited for site '$SiteName' -> error: $($jsonResult.meta.msg)"
@@ -3296,4 +3282,63 @@ function Remove-UnifiTag {
         }
     }
 }
+#endregion
+
+#region Wireless Network Management
+function Get-UnifiWirelessNetwork {
+    <#
+    .SYNOPSIS
+        Gets wireless networks of a unifi site
+    .DESCRIPTION
+        Gets wireless networks of a unifi site
+        
+        You can pipe the output from "Get-UnifiSite" to this cmdlet
+    .EXAMPLE
+        PS C:\> Get-UnifiDevice -SiteName "default" | Get-UnifiWirelessNetwork
+        Returns all wireless networks from site "default"
+    .EXAMPLE
+        PS C:\> Get-UnifiSite * | Get-UnifiWirelessNetwork
+        Returns all wireless networks from all sites
+    .OUTPUTS
+        Returns JSON-Data
+    #>
+    [CmdletBinding()]
+    [OutputType([Object])]
+
+    param(
+        # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
+        [String]
+        $SiteName,
+
+        # Show the PSK as plaintext
+        [Parameter(Mandatory = $false)]
+        [switch]
+        $ShowPassphrase,
+
+        # Do not filter or rename output, just sent the json result back as raw data
+        [Parameter(Mandatory = $false)]
+        [switch]
+        $Raw
+    )
+   
+    process {
+        try {
+            $jsonResult = Invoke-UnifiRestCall -Method GET -Route "api/s/$($SiteName)/rest/wlanconf"
+
+            if ($jsonResult.meta.rc -eq "ok") {
+
+                if ($Raw) {
+                    $jsonResult.data
+                } else {
+                    Build-UnifiWirelessNetworkObject $jsonResult.data
+                }
+            }
+
+        } catch {
+            Write-Error "Something went wrong while fetching wireless networks for site '$SiteName' ($($_.Exception))" -ErrorAction Stop
+        }
+    }
+}
+
 #endregion
