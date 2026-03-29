@@ -17,3 +17,14 @@ Foreach($import in @($Public + $Private)) {
 }
 
 Export-ModuleMember -Function $Public.Basename
+
+# Load .cs files (contains types)
+Get-ChildItem -Path (Join-Path $PSScriptRoot 'Types') -Filter 'Unifi.*.cs' | ForEach-Object {
+    $File = $_
+    try {
+        $null = New-Object ($File.Name -replace '\.cs$')
+    } catch {
+        Add-Type -Path $File.FullName
+    }
+}
+
