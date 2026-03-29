@@ -1,28 +1,24 @@
 ﻿function Invoke-UnifiLogin {
     <#
     .SYNOPSIS
-        Makes a RestMethod request to the unifi api, which will hopefully login the given user
+        Performs a login request to the unifi-controller
     .DESCRIPTION
-        Makes a RestMethod request to the unifi api, which will hopefully login the given user
-        Credentials can be directly used with $Credentials-Parameter (you will be asked for credentials if this parameter is omitted).
-        If the login succeeds a WebSession is saved to $Script:WebSession
-
-        A timeout can be specified for the webrequest
-    .EXAMPLE
-        PS C:\> Invoke-UnifiLogin -Uri https://localhost:8443/api -Timeout 5
-        Logs in to the unifi server at the specified address and wait max. 5 seconds
+        Performs a login request to the unifi-controller and saves a websession for future requests to the api.
+    EXAMPLE
+        PS C:\> Invoke-UnifiLogin -Server https://localhost:8443 -SkipCertificateCheck -PassThru
+        Tries to login to the unifi controller without checking the ssl certificate and returns information about the own user.
     .OUTPUTS
-        Returns $True on Success
-        Returns $False on Failure
+        Returns an object of type 'Unifi.User' when '-PassThru' is set, else returns nothing
     #>
     [CmdletBinding()]
-    [OutputType([Boolean])]
+    [OutputType([Unifi.User] -or $null)]
 
     param(
         # Uri of the UniFi Server
         [Parameter(
             Mandatory = $true
         )]
+        [Alias("Server")]
         [string]
         $Uri,
 
@@ -39,20 +35,29 @@
         )]
         [ValidateNotNullOrEmpty()]
         [Int]
-        $Timeout= 5
+        $Timeout= 5,
+
+        [Parameter()]
+        [switch]$SkipCertificateCheck,
+
+        [Parameter()]
+        [switch]$PassThru
     )
 
     process {
-        $script:BaseUri = $Uri
+        $script:BaseUri = "{0}/api" -f $Uri
         $script:Timeout = $Timeout
         $Script:WebSession = $null
 
-        $TestSkipCertParam = (Get-Command Invoke-RestMethod).Parameters.SkipCertificateCheck
-        if ($TestSkipCertParam) { # Parameter to skip cert is available, so why not use it
-            $script:useSkipCertParam = $true
-        } else { # Parameter to skip cert is not available, try a workaround
-            try {
-                add-type @"
+        if ($SkipCertificateCheck) {
+            Write-Verbose "You requested to ignore server-certificates. Check which method we need to use"
+            $TestSkipCertParam = (Get-Command Invoke-RestMethod).Parameters.SkipCertificateCheck
+            if ($TestSkipCertParam) { # Parameter to skip cert is available, so why not use it
+                Write-Verbose "Invoke-RestMethod has a 'SkipCertificateCheck'-Parameter. Use it"
+                $script:useSkipCertParam = $true
+            } else { # Parameter to skip cert is not available, try a workaround
+                try {
+                    add-type @"
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
 public class TrustAllCertsPolicy : ICertificatePolicy {
@@ -63,39 +68,70 @@ public class TrustAllCertsPolicy : ICertificatePolicy {
     }
 }
 "@
-                [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
-            } catch {}
+                    [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+                    Write-Verbose "Invoke-RestMethod does not have a 'SkipCertificateCheck'-Parameter. Use CertificatePolicy-Method"
+                } catch {
+                    Write-Warning "'SkipCertificateCheck' is enabled, but we could not set the CertificatePolicy"
+                }
+            }
         }
 
         if (!($Credential)) {
             $Credential = (Get-Credential -Message "Login for UniFi-Controller $($script:BaseUri)")
         }
-        $Body = @{ "username" = $Credential.UserName; "password" = $Credential.GetNetworkCredential().Password } | ConvertTo-JSON
 
-        $restParams = @{
+        $Splat = @{
+            Method = "POST"
+            Uri = "{0}/login" -f $script:BaseUri
             Headers = @{"charset"="utf-8";"Content-Type"="application/json"}
             TimeoutSec = $script:Timeout
-            Uri = $($script:BaseUri) + "/api/login"
             SessionVariable = "WebSession"
-            Verbose = $false
-            Method = "Post"
-        }
+            Body = @{ "username" = $Credential.UserName; "password" = $Credential.GetNetworkCredential().Password } | ConvertTo-JSON
+        }; $Credential = $null
 
         if ($script:useSkipCertParam) {
-            $restParams.SkipCertificateCheck = $true
+            $Splat.SkipCertificateCheck = $true
         }
 
-        $jsonResult = Invoke-UnifiRestCall -Method POST -Route "login" -Body $Body -CustomRestParams $restParams
+        Write-Verbose ("Calling {0} [{1}]" -f $Splat.Uri, $Splat.Method)
 
-        $Credential = $null
-        $Body = $null
+        try {
+            $result = Invoke-WebRequest @Splat
+            $apiResult = $result.Content | ConvertFrom-Json
+            $httpStatusCode = $result.StatusCode
+        } catch [System.Net.Sockets.SocketException] {
+            Throw "Connection refused to {0}" -f $Splat.Uri
+        } catch [Newtonsoft.Json.JsonReaderException] {
+            Throw "HTTP-Code {0}; API-Response is not in JSON format: {1}" -f $httpStatusCode, $result
+        } catch {
+            $errorDetails = $_.ErrorDetails
+            $httpStatusCode = $_.Exception.Response.StatusCode.value__
+            try {
+                $apiResult = $_.ErrorDetails | ConvertFrom-Json
+            } catch [Newtonsoft.Json.JsonReaderException] {
+                # This might not be a json-string. Throw the error message as it is
+                Throw "HTTP-Code {0}; API-Response is not in JSON format: {1}" -f $httpStatusCode, $errorDetails
+            }
+        }
 
-        if ($jsonResult.meta.rc -eq "ok") {
+        if ($apiResult.meta.rc -eq "ok") {
             Write-Verbose "Login to Unifi-Controller successful"
-            return $True
         } else {
-            Write-Error "Login to Unifi-Controller failed"
-            return $False
+            switch ( $apiResult.meta.msg ) {
+                "api.err.Invalid" {
+                    $reason = "Invalid credentials"
+                }
+
+                default {
+                    $reason = "Unknown {0}" -f $_
+                }
+            }
+            Throw "Login failed with http statuscode {0}! ({1})" -f $httpStatusCode,$reason
+        }
+
+        $script:WebSession = $WebSession
+        if ($PassThru) {
+            Get-UnifiLogin
         }
     }
 }
