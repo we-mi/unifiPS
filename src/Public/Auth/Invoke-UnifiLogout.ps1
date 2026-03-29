@@ -9,7 +9,7 @@
         Logs out of the server
     .OUTPUTS
         Returns $True on Success
-        Returns $False on Failure
+        Throws an exception on error
     #>
     [CmdletBinding()]
     [OutputType([Boolean])]
@@ -17,15 +17,10 @@
     param()
 
     process {
-        $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/logout"
+        $null = Invoke-UnifiRestCall -Method POST -Route "logout"
 
-        if ($jsonResult.meta.rc -eq "ok") {
-            Write-Verbose "Logout from Unifi-Controller successful"
-            return $True
-        } else {
-            Write-Error "Logout from Unifi-Controller failed"
-            return $False
-        }
-
+        Write-Verbose "Logout from Unifi-Controller successful"
+        
+        $True
     }
 }
