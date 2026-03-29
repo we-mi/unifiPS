@@ -85,6 +85,10 @@
                     $reason = "Invalid credentials"
                 }
 
+                "api.err.LoginRequired" {
+                    $reason = "Not logged in"
+                }
+
                 "api.err.NoSiteContext" {
                     $reason = "No site given or invalid api route"
                 }
