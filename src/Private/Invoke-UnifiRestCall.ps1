@@ -57,7 +57,7 @@
             }
         }
 
-        Write-Verbose ("Calling {0} [{1}]" -f $Splat.Uri, $Splat.Method)
+        Write-Debug ("Calling {0} [{1}]" -f $Splat.Uri, $Splat.Method)
 
         try {
             $result = Invoke-WebRequest @Splat
@@ -79,7 +79,7 @@
         }
 
         if ($apiResult.meta.rc -eq "ok") {
-            Write-Verbose ("Request to '{0}' finished with 'ok' status. Returning data" -f $Route)
+            Write-Debug ("Request to '{0}' finished with 'ok' status. Returning data" -f $Route)
         } else {
             switch ( $apiResult.meta.msg ) {
                 "api.err.Invalid" {
