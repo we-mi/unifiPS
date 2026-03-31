@@ -42,6 +42,7 @@
             Headers = @{"charset"="utf-8";"Content-Type"="application/json"}
             TimeoutSec = $script:Timeout
             WebSession = $script:WebSession
+            Verbose = $false
         }
 
         if ($script:useSkipCertParam) {
