@@ -131,7 +131,7 @@ public class TrustAllCertsPolicy : ICertificatePolicy {
 
         $script:WebSession = $WebSession
         if ($PassThru) {
-            Get-UnifiLogin
+            Get-UnifiSelf
         }
     }
 }

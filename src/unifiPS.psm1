@@ -28,3 +28,5 @@ Get-ChildItem -Path (Join-Path $PSScriptRoot 'Types') -Filter 'Unifi.*.cs' | For
     }
 }
 
+# Set some aliases for backwards compatibility
+Set-Alias -Name Get-UnifiLogin -Value Get-UnifiSelf
