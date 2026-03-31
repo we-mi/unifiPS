@@ -90,8 +90,36 @@
                     $reason = "Not logged in"
                 }
 
+                "api.err.NoPermission" {
+                    $reason = "No permission"
+                }
+
+                "api.err.PasswordsDontMatch" {
+                    $reason = "Password mismatch"
+                }
+
+                "api.err.IdInvalid" {
+                    $reason = "Unknown user"
+                }
+
+                "api.err.EmailExisted" {
+                    $reason = "Another user uses the same email-address"
+                }
+
+                "api.err.InvalidEmail" {
+                    $reason = "Invalid Email address"
+                }
+
+                "api.err.NameExisted" {
+                    $reason = "Another user uses the same name"
+                }
+
                 "api.err.NoSiteContext" {
                     $reason = "No site given or invalid api route"
+                }
+
+                "api.err.InvalidAdminPassword" {
+                    $reason = "Invalid or empty password"
                 }
 
                 default {
