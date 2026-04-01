@@ -1,19 +1,21 @@
 function Remove-UnifiAdmin {
     <#
     .SYNOPSIS
-        Create a new unifi admin account
+        Remove a unifi admin account
     .DESCRIPTION
-        Create a new unifi admin account
+        Remove a unifi admin account
     .NOTES
-        The name and the email-address have to be unique.
+        You can only remove admins in the default site right now. More will come soon
     .EXAMPLE
-        PS C:\> New-UnifiAdmin -Name hans -Password (Read-Host -AsSecureString -Prompt "Password")
-        Will create a new user with the name "hans" and set the password for which was asked
+        PS C:\> Remove-UnifiAdmin -Name hans
+        Will remove the user with the name "hans"
+    .EXAMPLE
+        PS C:\> Get-UnifiAdmin | Remove-UnifiAdmin
+        Will remove every user but yourself. You propably don't want to do this
     .OUTPUTS
-        Returns 'Unifi.User'-Object when '-PassThru' is set, else nothing
+        Nothing
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
-    [OutputType([Unifi.User] -or $null)]
 
     param(
         [Parameter(Mandatory, ValueFromPipelineByPropertyName, ValueFromPipeline, Position=1, ParameterSetName="String")]
