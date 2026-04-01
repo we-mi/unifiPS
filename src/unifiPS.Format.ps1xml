@@ -6,7 +6,6 @@
       <ViewSelectedBy>
         <TypeName>Unifi.User</TypeName>
       </ViewSelectedBy>
-
       <ListControl>
         <ListEntries>
           <ListEntry>
@@ -22,7 +21,25 @@
           </ListEntry>
         </ListEntries>
       </ListControl>
+    </View>
 
+    <View>
+      <Name>Unifi.Site</Name>
+      <ViewSelectedBy>
+        <TypeName>Unifi.Site</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>ID</PropertyName></ListItem>
+              <ListItem><PropertyName>InternalName</PropertyName></ListItem>
+              <ListItem><PropertyName>Name</PropertyName></ListItem>
+              <ListItem><PropertyName>DeviceCount</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
     </View>
   </ViewDefinitions>
 </Configuration>

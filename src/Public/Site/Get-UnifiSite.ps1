@@ -25,69 +25,36 @@
 
     param(
         # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
-        [Parameter( ParameterSetName = "SiteName", Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
+        [Parameter()]
         [String[]]
         $SiteName,
 
         # ID of the site
-        [Parameter( ParameterSetName = "SiteID", Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
+        [Parameter()]
         [String[]]
         $SiteID,
 
         # friendlyName of the site (Unifi's internal name for this field is 'desc'). This is the value visible in the web interface
-        [Parameter( ParameterSetName = "SiteDisplayName", Mandatory = $true, ValueFromPipelineByPropertyName = $true, Position = 0 )]
+        [Parameter()]
         [Alias("SiteDescription")]
+        [Alias("Name")]
         [String[]]
-        $SiteDisplayName,
-
-        # Do not filter or rename output, just sent the json result back as raw data
-        [Parameter(Mandatory = $false)]
-        [switch]
-        $Raw
+        $SiteDisplayName
     )
 
     process {
-        try {
-            $jsonResult = Invoke-UnifiRestCall -Method GET -Route "api/self/sites"
+        $jsonResult = Invoke-UnifiRestCall -Method GET -Route "self/sites"
 
-            if ($jsonResult.meta.rc -eq "ok") {
+        if ( ![String]::IsNullOrWhiteSpace($Name) ) {
+            $jsonResult = $jsonResult | Where-Object { $_.Name -like $Name }
+        }
 
-                switch ($PSCmdlet.ParameterSetName) {
-                    "SiteName" {
-                        $tmpList = @()
-                        foreach($singleSiteName in $SiteName) {
-                            $tmpList += $jsonResult.data | Where-Object { $_.Name -like $singleSiteName }
-                        }
-                        $jsonResult.data = $tmpList
-                    }
-                    "SiteID" {
-                        $tmpList = @()
-                        foreach($singleSiteID in $SiteID) {
-                            $tmpList += $jsonResult.data | Where-Object { $_._id -like $singleSiteID }
-                        }
-                        $jsonResult.data = $tmpList
-                    }
-                    "SiteDisplayName" {
-                        $tmpList = @()
-                        foreach($singleSiteDisplayName in $SiteDisplayName) {
-                            $tmpList += $jsonResult.data | Where-Object { $_.desc -like $singleSiteDisplayName }
-                        }
-                        $jsonResult.data = $tmpList
-                    }
-                }
+        if ( ![String]::IsNullOrWhiteSpace($Email) ) {
+            $jsonResult = $jsonResult | Where-Object { $_.email -like $Email }
+        }
 
-                if ($Raw) {
-                    $jsonResult.data
-                } else {
-                    $jsonResult.data | Select-Object    @{N="SiteID";E={$_._id}},
-                                                        @{N="SiteDisplayName";E={$_.desc}},
-                                                        @{N="SiteName";E={$_.name}},
-                                                        @{N="NoDelete";E={ if ($_.attr_no_delete) {$_.attr_no_delete} else { $False }}}
-                }
-            }
-
-        } catch {
-            Write-Error "Something went wrong while fetching sites ($($_.Exception))" -ErrorAction Stop
+        foreach ($site in $jsonResult) {
+            [Unifi.Site]::new($site)
         }
     }
 }
