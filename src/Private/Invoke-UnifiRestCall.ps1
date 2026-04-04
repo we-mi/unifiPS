@@ -118,6 +118,10 @@
                     $reason = "No site given or invalid api route"
                 }
 
+                "api.err.DuplicateSiteName" {
+                    $reason = "Site with this internal name already exists"
+                }
+
                 "api.err.InvalidAdminPassword" {
                     $reason = "Invalid or empty password"
                 }
