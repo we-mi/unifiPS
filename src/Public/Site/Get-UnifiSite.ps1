@@ -1,56 +1,74 @@
 ﻿function Get-UnifiSite {
     <#
     .SYNOPSIS
-        Gets one or more sites of the unifi controller
+        Lists sites of a unifi controller
     .DESCRIPTION
-        Gets one or more sites of the unifi controller
-        You can filter by SiteName (internal site name) or SiteID or SiteDisplayName (name visible in the web interface, unifi's internal name for this field is 'desc')
+        Lists sites of a unifi controller. You can filter by ID, internal name and display name
+    .NOTES
+        You almost never come in touch with the ID of the site.
+        The "InternalName" is what you need to talk to the api and it's also displayed in the url when the site is selected.
+        "Name" is what you will see as the actual name of the site (internally handled as the site description)
     .EXAMPLE
-        PS C:\> Get-UnifiSite -DisplayName *
-        Lists all sites
+        PS C:\> Get-UnifiSite
+        List all sites
     .EXAMPLE
-        PS C:\> Get-UnifiSite -DisplayName "Default","*Test*"
-        Lists all sites which contains the string "Test" and the site with the name "Default"
+        PS C:\> Get-UnifiSite -Name "Default","*Test*"
+        Lists the site "default" and all sites which contain "Test" in the display name of the site
     .EXAMPLE
-        PS C:\> Get-UnifiSite -SiteName "67itznop"
-        Lists the site with the SiteName '67itznop'
+        PS C:\> Get-UnifiSite -InternalName "67itznop"
+        Lists the site with the internal name '67itznop'
     .EXAMPLE
-        PS C:\> Get-UnifiSite SiteID "623e1bf66a5d4f1280160b7e"
+        PS C:\> Get-UnifiSite -ID "623e1bf66a5d4f1280160b7e"
         Lists the site with the ID '623e1bf66a5d4f1280160b7e'
     .OUTPUTS
-        Returns JSON-Data
+        Returns objects of type 'Unifi.Site'
     #>
-    [CmdletBinding(DefaultParameterSetName="SiteDisplayName")]
-    [OutputType([Object])]
+    [CmdletBinding(DefaultParameterSetName="Name")]
+    [OutputType([Unifi.Site])]
 
     param(
-        # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
-        [Parameter()]
+        [Parameter(ParameterSetName="ID")]
         [String[]]
-        $SiteName,
+        $ID,
 
-        # ID of the site
-        [Parameter()]
+        # Used for most API Calls
+        [Parameter(ParameterSetName="InternalName")]
         [String[]]
-        $SiteID,
+        $InternalName,
 
-        # friendlyName of the site (Unifi's internal name for this field is 'desc'). This is the value visible in the web interface
-        [Parameter()]
-        [Alias("SiteDescription")]
-        [Alias("Name")]
+        # internally handled as "description"
+        [Parameter(ParameterSetName="Name",Position=0)]
         [String[]]
-        $SiteDisplayName
+        $Name
     )
 
     process {
         $jsonResult = Invoke-UnifiRestCall -Method GET -Route "self/sites"
 
-        if ( ![String]::IsNullOrWhiteSpace($Name) ) {
-            $jsonResult = $jsonResult | Where-Object { $_.Name -like $Name }
-        }
+        switch ($PSCmdlet.ParameterSetName) {
+            "ID" {
+                $tmpList = @()
+                foreach($entity in $ID) {
+                    $tmpList += $jsonResult | Where-Object { $_._id -like $entity }
+                }
+                $jsonResult = $tmpList | Sort-Object -Property _id -Unique
+            }
 
-        if ( ![String]::IsNullOrWhiteSpace($Email) ) {
-            $jsonResult = $jsonResult | Where-Object { $_.email -like $Email }
+            "InternalName" {
+                $tmpList = @()
+                foreach($entity in $InternalName) {
+                    $tmpList += $jsonResult | Where-Object { $_.name -like $entity }
+                }
+                $jsonResult = $tmpList | Sort-Object -Property _id -Unique
+            }
+
+            "Name" {
+                $tmpList = @()
+                foreach($entity in $Name) {
+                    $tmpList += $jsonResult | Where-Object { $_.desc -like $entity }
+                }
+                $jsonResult = $tmpList | Sort-Object -Property _id -Unique
+            }
         }
 
         foreach ($site in $jsonResult) {
