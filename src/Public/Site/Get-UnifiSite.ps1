@@ -38,8 +38,7 @@
 
         # internally handled as "description"
         [Parameter(ParameterSetName="Name",Position=0)]
-        [String[]]
-        $Name
+        [String[]]$Name = @("*"),
     )
 
     process {
