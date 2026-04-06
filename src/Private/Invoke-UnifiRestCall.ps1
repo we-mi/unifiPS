@@ -126,6 +126,18 @@
                     $reason = "Invalid or empty password"
                 }
 
+                "api.err.InvalidIpOrHostname" {
+                    $reason = "Invalid IP or Hostname"
+                }
+
+                "api.err.InvalidPayload" {
+                    $reason = "Invalid Payload"
+                }
+
+                "api.err.InvalidSshKey" {
+                    $reason = "Invalid SSH Key"
+                }
+
                 default {
                     $reason = "Unknown"
                 }
