@@ -24,10 +24,18 @@
         [string]
         $Route,
 
+        [Parameter()]
+        [string]
+        $Prefix = "/api",
+
         # Body for Invoke-RestMethod (will only be applied if $Method is POST, PUT or DELETE)
         [Parameter(Mandatory = $False)]
         [Object]
-        $Body
+        $Body,
+
+        [Parameter()]
+        [switch]
+        $ReturnWithMetadata
     )
 
     process {
@@ -38,7 +46,7 @@
 
         $Splat = @{
             Method = $Method
-            Uri = "{0}/{1}" -f $script:BaseUri, $Route
+            Uri = "{0}{1}/{2}" -f $script:BaseUri, $Prefix, $Route
             Headers = @{"charset"="utf-8";"Content-Type"="application/json"}
             TimeoutSec = $script:Timeout
             WebSession = $script:WebSession
@@ -115,7 +123,7 @@
                 }
 
                 "api.err.NoSiteContext" {
-                    $reason = "No site given or invalid api route"
+                    $reason = "No site given, site does not exist or invalid api route"
                 }
 
                 "api.err.DuplicateSiteName" {
@@ -146,6 +154,10 @@
             Throw "Request to '{0}' failed with http statuscode {1}! (Reason: {2})" -f $Splat.Uri, $httpStatusCode, $reason
         }
 
-        return $apiResult.data
+        if ($ReturnWithMetadata.IsPresent) {
+            return $apiResult
+        } else {
+            return $apiResult.data
+        }
     }
 }

@@ -45,7 +45,7 @@
     )
 
     process {
-        $script:BaseUri = "{0}/api" -f $Uri
+        $script:BaseUri = "{0}" -f $Uri
         $script:Timeout = $Timeout
         $Script:WebSession = $null
 
@@ -82,7 +82,7 @@ public class TrustAllCertsPolicy : ICertificatePolicy {
 
         $Splat = @{
             Method = "POST"
-            Uri = "{0}/login" -f $script:BaseUri
+            Uri = "{0}/api/login" -f $script:BaseUri
             Headers = @{"charset"="utf-8";"Content-Type"="application/json"}
             TimeoutSec = $script:Timeout
             SessionVariable = "WebSession"
