@@ -1,72 +1,47 @@
 ﻿function Remove-UnifiSite {
     <#
     .SYNOPSIS
-        Deletes a unifi site
+        Remove a unifi site
     .DESCRIPTION
-        Deletes a unifi site. Be careful with this!
+        Remove a unifi site
     .EXAMPLE
-        PS C:\> Remove-UnifiSite -SiteName 67itznop
-        Removes the unifi site with the SiteName '67itznop', but asks for confirmation
-    .EXAMPLE
-        PS C:\> Get-UnifiSite -SiteDisplayName 'ProductionSite' | Remove-UnifiSite -Force
-        Removes the unifi site with the DisplayName 'ProductionSite' and does NOT ask for confirmation
+        PS C:\> Get-UnifiSite "not_my_production_site" | Remove-UnifiSite
+        Will try to get the Unifi.Site-Object for "not_my_production_site" and attempts to delete it
     .OUTPUTS
-        Returns $True on Success
-        Returns $False on Failure
+        Nothing
     #>
-    [CmdletBinding()]
-    [OutputType([boolean])]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 
     param(
-        # Name of the site (Unifi's internal name is used, not the name visible in the web interface)
-        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true )]
-        [String]
-        $SiteName,
+        [Parameter(Mandatory, ValueFromPipelineByPropertyName, ValueFromPipeline, Position=1, ParameterSetName="String")]
+        [String]$SiteName,
 
-        # Do not ask for confirmation
-        [Parameter(Mandatory = $false)]
-        [switch]
-        $Force
+        [Parameter(Mandatory, ValueFromPipelineByPropertyName, ValueFromPipeline, Position=1, ParameterSetName="Object")]
+        [Unifi.Site]$SiteObject
     )
 
+    begin {
+        # Get a list of all users or just us before we do anything
+        $allSites = Get-UnifiSite
+    }
+
     process {
-        try {
-            $site = Get-UnifiSite -SiteName $SiteName
 
-            if ($site) {
-                if (!$Force) {
-                    do {
-                        $answer = Read-Host -Prompt "Do you really want to delete the site '$($SiteName)' (DisplayName: $($site.SiteDisplayName))? Be **extremely careful with this** (y/N): "
-                    } while($answer -ne "y" -and $answer -ne "n" -and $answer -ne "")
+        if ($PSCmdlet.ParameterSetName -eq "String") {
+            # we only got a username. Get the Unifi-Object of it
+            $SiteObject = $allSites | Where-Object { $_.Name -eq $SiteName }
+        }
 
-                    if ($answer -eq "" -or $answer -eq "n") {
-                        Write-Verbose "Deletion of site '$($SiteName)' (DisplayName: $($site.SiteDisplayName)) was aborted by user"
-                        return $False
-                    }
+        $Body = @{
+            site = $SiteObject.ID
+            cmd = "delete-site"
+        }
 
-                }
+        $Method = "POST"
+        $Route = "s/{0}/cmd/sitemgr" -f $SiteObject.InternalName
 
-                $Body = @{
-                    site = $site.SiteID
-                    cmd = "delete-site"
-                } | ConvertTo-Json
-                $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/s/$($SiteName)/cmd/sitemgr" -Body $Body
-
-                if ($jsonResult.meta.rc -eq "ok") {
-                    Write-Verbose "Site '$($SiteName)' (DisplayName: $($site.SiteDisplayName)) successfully deleted"
-                    return $True
-                } else {
-                    Write-Error "Site '$($SiteName)' (DisplayName: $($site.SiteDisplayName)) was NOT deleted"
-                    return $False
-                }
-            } else {
-                Write-Error "No site '$SiteName' was found"
-                return $False
-            }
-
-        } catch {
-            Write-Warning "Something went wrong while removing site $($SiteName) ($_)"
-            return $False
+        if ( $PSCmdlet.ShouldProcess($SiteObject.Name, "Remove unifi site") ) {
+            $null = Invoke-UnifiRestCall -Method $Method -Route $Route -Body ($Body | ConvertTo-Json)
         }
     }
 }
