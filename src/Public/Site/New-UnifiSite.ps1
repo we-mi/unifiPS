@@ -1,76 +1,44 @@
-﻿function New-UnifiSite {
+function New-UnifiSite {
     <#
     .SYNOPSIS
-        Creates a new unifi site
+        Create a new unifi site
     .DESCRIPTION
-        Creates a new unifi site.
-        It does check if a site with the same name is already present (You can have more than one site with the same DisplayName in the unifi controller (a bit stupid if you ask me...))
-        If you want to disable this check, use the 'DisableNameCheck'-Switch
+        Create a new unifi site
+    .NOTES
+        Setting most settings for a unifi site is not supported (yet?) in this cmdlet, but you can use '-PassThru' and pipe the output to 'Set-UnifiSite' to set some settings for a site.
     .EXAMPLE
-        PS C:\> New-UnifiSite -SiteDisplayName "My New Site"
-        Creates the new unifi site 'My New Site'
-    .EXAMPLE
-        PS C:\> New-UnifiSite -SiteDisplayName "My New Site" DisableNameCheck
-        Creates the new unifi site 'My New Site' even if a site with this DisplayName is already present
+        PS C:\> New-UnifiSite -Name superior_site
+        Will create a new site with the name "superior_site"
     .OUTPUTS
-        Returns JSON-Data from the newly created site
+        Returns 'Unifi.Site'-Object when '-PassThru' is set, else nothing
     #>
-    [CmdletBinding()]
-    [OutputType([Object])]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    [OutputType([Unifi.Site] -or $null)]
 
     param(
-        # (Display-)Name of the site under which it appears in the webui
-        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true, ValueFromPipeline = $true, Position = 0 )]
-        [String]
-        $SiteDisplayName,
+        [Parameter(Mandatory, Position=0)]
+        [String]$Name,
 
-        # Disable checking if a site name is already present
-        [Parameter(Mandatory = $false)]
-        [switch]
-        $DisableNameCheck,
-
-        # Do not filter or rename output, just sent the json result back as raw data
-        [Parameter(Mandatory = $false)]
-        [switch]
-        $Raw
+        [Parameter()]
+        [switch]$PassThru
     )
 
     process {
-        try {
 
-            if (!$DisableNameCheck) {
-                $sites = Get-UnifiSite "*"
+        $Body = @{
+            cmd = "add-site"
+            desc = $Name
+        }
 
-                if ($sites.SiteDisplayName -contains $SiteDisplayName) {
-                    Write-Error "There's already a site with the DisplayName '$SiteDisplayName' present."
-                    return ""
-                }
-            }
+        $Method = "POST"
+        $Route = "s/default/cmd/sitemgr" # Creating a site requires to use a site api endpoint (why though unifi??). We use the default site here, because it's already there and cannot be deleted
 
-            $Body = @{
-                cmd = "add-site"
-                desc = $SiteDisplayName
-            } | ConvertTo-Json
+        if ( $PSCmdlet.ShouldProcess($Name, "Create new unifi site") ) {
+            $jsonResult = Invoke-UnifiRestCall -Method $Method -Route $Route -Body ($Body | ConvertTo-Json)
+        }
 
-            $jsonResult = Invoke-UnifiRestCall -Method POST -Route "api/s/default/cmd/sitemgr" -Body $Body
-
-            if ($jsonResult.meta.rc -eq "ok") {
-                Write-Verbose "Site '$SiteDisplayName' successfully created"
-
-                if ($Raw) {
-                    $jsonResult.data
-                } else {
-                    $jsonResult.data | Select-Object    @{N="SiteName";E={$_.name}},
-                                                        @{N="SiteID";E={$_._id}},
-                                                        @{N="SiteDisplayName";E={$_.desc}}
-
-                }
-            } else {
-               Write-Error "Site '$SiteDisplayName' was NOT created ($jsonResult.meta.msg)"
-            }
-
-        } catch {
-            Write-Warning "Something went wrong while creating a new site $($SiteDisplayName) ($_)"
+        if ($PassThru) {
+            [Unifi.Site]::new($jsonResult)
         }
     }
 }
