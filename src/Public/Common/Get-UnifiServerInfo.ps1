@@ -22,7 +22,7 @@ function Get-UnifiServerInfo {
     )
 
     process {
-        $jsonResult = Invoke-UnifiRestCall -Method GET -Route "status"
+        $jsonResult = Invoke-UnifiRestCall -Method GET -Route "status" -Prefix $null -ReturnWithMetadata:$false
 
         if ($jsonResult.meta.rc -eq "ok") {
             if ($Raw) {
