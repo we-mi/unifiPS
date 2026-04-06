@@ -11,6 +11,8 @@ namespace Unifi {
         public string   Name            { get; set; }
         public bool     Protected       { get; set; } = false;
         public Int64    DeviceCount     { get; set; }
+        public object   Health          { get; set; }
+        public object   Settings        { get; set; }
 
         public Site() {}
 
@@ -59,6 +61,16 @@ namespace Unifi {
                     case "DeviceCount":
                     case "device_count":
                         this.DeviceCount = (Int64)value;
+                        break;
+
+                    case "health":
+                    case "Health":
+                        this.Health = value;
+                        break;
+
+                    case "settings":
+                    case "Settings":
+                        this.Settings = value;
                         break;
                 }
             }
