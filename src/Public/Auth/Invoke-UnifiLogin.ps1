@@ -4,7 +4,7 @@
         Performs a login request to the unifi-controller
     .DESCRIPTION
         Performs a login request to the unifi-controller and saves a websession for future requests to the api.
-    EXAMPLE
+    .EXAMPLE
         PS C:\> Invoke-UnifiLogin -Server https://localhost:8443 -SkipCertificateCheck -PassThru
         Tries to login to the unifi controller without checking the ssl certificate and returns information about the own user.
     .OUTPUTS
