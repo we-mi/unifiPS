@@ -58,14 +58,6 @@ function Initialize-UnifiController {
         [System.Management.Automation.PSCredential]
         $SSHCredentials,
 
-        # Timeout in seconds
-        [Parameter(
-            Mandatory = $false
-        )]
-        [ValidateNotNullOrEmpty()]
-        [Int]
-        $Timeout= 5,
-
         [Parameter()]
         [switch]$SkipCertificateCheck
     )
