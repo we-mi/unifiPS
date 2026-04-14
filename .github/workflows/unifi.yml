@@ -1,0 +1,117 @@
+name: UnifiPS
+
+on:
+  push:
+    branches: [ "main", "devel" ]
+  pull_request:
+    branches: [ "main", "devel" ]
+  workflow_dispatch:
+
+env:
+  UNIFI_URI: "https://localhost:8443"
+  UNIFI_USER: "admin"
+  UNIFI_PASS: "testpassword"
+
+jobs:
+  lint:
+    permissions:
+      security-events: write
+    name: "PSScriptAnalyzer"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Run PSScriptAnalyzer
+        uses: microsoft/psscriptanalyzer-action@v1.1
+        with:
+          path: .\src
+          recurse: true
+          excludeRule: '"PSAvoidLongLines"'
+          output: results.sarif
+
+      - name: Upload SARIF results file
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: results.sarif
+
+  unifi-test:
+    name: Testing unifiPS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Start unifi docker container
+        run: docker run -d --name unifi-controller -p 8443:8443 -e TZ=UTC jacobalberty/unifi:latest
+
+      - name: Install PowerShell
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q powershell
+
+      - name: Install Pester
+        shell: pwsh
+        run: |
+          Install-Module -Name Pester -Force -Scope AllUsers -MinimumVersion 5.7.1
+          Import-Module Pester
+          Get-Module Pester | Select-Object -ExpandProperty Version
+
+      - name: Wait for unifi controller to be ready
+        run: |
+          echo "Waiting for unifi controller to become available..."
+
+          #just wait 1min until we have something better
+          sleep 60
+
+      - name: Prepare unifi controller for first use
+        run: |
+          curl -sk -X POST https://localhost:8443/api/cmd/sitemgr \
+            -H "Content-Type: application/json" \
+            -d '{
+              "cmd": "add-default-admin",
+              "name": "${{ env.UNIFI_USER }}",
+              "email": "ci@example.com",
+              "x_password": "${{ env.UNIFI_PASS }}"
+            }'
+
+          curl -sk -X POST https://localhost:8443/api/cmd/system \
+            -H "Content-Type: application/json" \
+            -d '{ "cmd": "set-installed" }'
+
+      - name: Run Pester tests
+        shell: pwsh
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path = "./tests"
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = "Detailed"
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = "test-results.xml"
+          $config.TestResult.OutputFormat = "JUnitXml"
+          Invoke-Pester -Configuration $config
+
+      - name: Publish test results
+        uses: dorny/test-reporter@v3
+        if: always()
+        with:
+          name: Pester Test Results
+          path: test-results.xml
+          reporter: java-junit
+
+      - name: Upload test result artifact
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pester-results
+          path: test-results.xml
+
+      - name: Dump unifi container logs on failure
+        if: failure()
+        run: docker logs unifi-controller
+
+      - name: Stop and remove unifi container
+        if: always()
+        run: docker rm -f unifi-controller || true
