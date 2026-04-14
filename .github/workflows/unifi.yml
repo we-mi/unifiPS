@@ -60,11 +60,15 @@ jobs:
           Get-Module Pester | Select-Object -ExpandProperty Version
 
       - name: Wait for unifi controller to be ready
+        shell: pwsh
         run: |
-          echo "Waiting for unifi controller to become available..."
+          # Using our own cmdlet and wait for the unifi controller to be ready :>
 
-          #just wait 1min until we have something better
-          sleep 60
+          Import-Module ./src/unifiPS.psd1
+
+          if ( !(Wait-UnifiController -Server $env:UNIFI_URI -Timeout 100 -SkipCertificateCheck -WaitForPort -Verbose) ) {
+              Throw "Unifi controller did not start in time. Exiting"
+          }
 
       - name: Prepare unifi controller for first use
         run: |
