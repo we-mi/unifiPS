@@ -35,22 +35,50 @@
 
         [Parameter()]
         [switch]
-        $ReturnWithMetadata
+        $ReturnWithMetadata,
+
+        [Parameter()]
+        [switch]
+        $IgnoreWebSession,
+
+        [Parameter()]
+        [ValidateNotNullOrWhiteSpace()]
+        [String]
+        $BaseUri,
+
+        [Parameter()]
+        [ValidateScript({$_ -ge 0})]
+        [Int]
+        $Timeout = 5
     )
 
     process {
 
-        if ($null -eq $script:WebSession) {
+        # we can pass our own custom BaseUri or use the one we saved earlier with 'Invoke-UnifiLogin' after a successful login
+        # $script:BaseUri is empty/$null when we do not have a successful login. This will be checked with 'ValidateNotNullOrWhiteSpace' in the parameter definition
+        # In the end you will be forced to pass your own BaseUri or be logged in
+        if ( [String]::IsNullOrWhiteSpace($BaseUri) ) {
+            $BaseUri = $script:BaseUri
+        }
+
+        if ( [int]::TryParse($script:Timeout, [ref]$null) ) {
+            $Timeout = $script:Timeout
+        }
+
+        if ($null -eq $script:WebSession -and $IgnoreWebSession.IsPresent -eq $False) {
             Throw "Not connected to a unifi-server! Use 'Invoke-UnifiLogin' first."
         }
 
         $Splat = @{
-            Method = $Method
-            Uri = "{0}{1}/{2}" -f $script:BaseUri, $Prefix, $Route
+            Method = $Method.ToUpper()
+            Uri = "{0}{1}/{2}" -f $BaseUri, $Prefix, $Route
             Headers = @{"charset"="utf-8";"Content-Type"="application/json"}
-            TimeoutSec = $script:Timeout
-            WebSession = $script:WebSession
+            TimeoutSec = $Timeout
             Verbose = $false
+        }
+
+        if ($null -ne $WebSession) {
+            $Splat.WebSession = $script:WebSession
         }
 
         if ($script:useSkipCertParam) {
@@ -76,7 +104,7 @@
         } catch [Newtonsoft.Json.JsonReaderException] {
             Throw "HTTP-Code {0}; API-Response is not in JSON format: {1}" -f $httpStatusCode, $result
         } catch {
-            $errorDetails = $_.ErrorDetails
+            $errorDetails = $( if ( -not [String]::IsNullOrWhiteSpace($_.ErrorDetails.Message) ) { $_.ErrorDetails.Message } else { $_.ErrorDetails } )
             $httpStatusCode = $_.Exception.Response.StatusCode.value__
             try {
                 $apiResult = $_.ErrorDetails | ConvertFrom-Json
