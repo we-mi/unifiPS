@@ -162,8 +162,8 @@ public class TrustAllCertsPolicy : ICertificatePolicy {
 
         # Step 7: Finish the setup
         $Body = @{
-            cmd         = 'get-installed'
+            cmd         = 'set-installed'
         }
-        Invoke-UnifiRestCall -Method Post -Route "cmd/system" -IgnoreWebSession -BaseUri $Server -Body $Body -ReturnWithMetadata
+        $null = Invoke-UnifiRestCall -Method Post -Route "cmd/system" -IgnoreWebSession -BaseUri $Server -Body $Body -ReturnWithMetadata
     }
 }
