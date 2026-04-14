@@ -71,19 +71,16 @@ jobs:
           }
 
       - name: Prepare unifi controller for first use
+        shell: pwsh
         run: |
-          curl -sk -X POST https://localhost:8443/api/cmd/sitemgr \
-            -H "Content-Type: application/json" \
-            -d '{
-              "cmd": "add-default-admin",
-              "name": "${{ env.UNIFI_USER }}",
-              "email": "ci@example.com",
-              "x_password": "${{ env.UNIFI_PASS }}"
-            }'
+          # Using our own cmdlet and setup the unifi controller for the first use
 
-          curl -sk -X POST https://localhost:8443/api/cmd/system \
-            -H "Content-Type: application/json" \
-            -d '{ "cmd": "set-installed" }'
+          Import-Module ./src/unifiPS.psd1
+
+          $Password = $env:UNIFI_PASS | ConvertTo-SecureString -AsPlainText -Force
+          $Credential = [System.Management.Automation.PSCredential]::new($env:UNIFI_USER,$Password)
+
+          Initialize-UnifiController -Server $env:UNIFI_URI -Credential $Credential -ControllerName "PesterTester" -Email "root@localhost" -SkipCertificateCheck
 
       - name: Run Pester tests
         shell: pwsh
