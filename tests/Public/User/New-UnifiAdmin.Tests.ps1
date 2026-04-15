@@ -57,7 +57,7 @@ Describe "New-UnifiAdmin" {
     It "Should re-create the user again and return it's object with -PassThru" {
         Get-UnifiAdmin -Name $newUserName | Remove-UnifiAdmin -Confirm:$false
         $user = New-UnifiAdmin -Name $newUserName -Password $newUserPassword -Email "user@localhost" -Confirm:$false -PassThru
-        $user | Should -BeOfType [UnifiUser]
+        $user | Should -BeOfType [Unifi.User]
         $user.name | Should -Be $newUserName
     }
 }
