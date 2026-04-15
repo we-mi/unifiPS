@@ -15,11 +15,11 @@ BeforeAll {
 Describe "New-UnifiAdmin" {
 
     It "Should not throw when creating a new admin" {
-        { New-UnifiAdmin -Name $newUserName -Password $newUserPassword }  | Should -Not -Throw
+        { New-UnifiAdmin -Name $newUserName -Password $newUserPassword -Confirm:$false }  | Should -Not -Throw
     }
 
     It "Should throw when trying to create the same user again" {
-        { New-UnifiAdmin -Name $newUserName -Password $newUserPassword }  | Should -Throw
+        { New-UnifiAdmin -Name $newUserName -Password $newUserPassword -Confirm:$false }  | Should -Throw
     }
 
     It "Should list the new admin" {
@@ -48,7 +48,7 @@ Describe "New-UnifiAdmin" {
 
     It "Should re-create the user after it was deleted (this time with a mail address" {
         Get-UnifiAdmin -Name $newUserName | Remove-UnifiAdmin -Confirm:$false
-        { New-UnifiAdmin -Name $newUserName -Password $newUserPassword -Email "user@localhost"}  | Should -Not -Throw
+        { New-UnifiAdmin -Name $newUserName -Password $newUserPassword -Email "user@localhost" -Confirm:$false }  | Should -Not -Throw
     }
 
     It "Should have the mail address filled" {
