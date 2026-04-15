@@ -27,6 +27,18 @@ Describe "Get-UnifiAdmin" {
     It "Should return our own user" {
         (Get-UnifiAdmin).Name | Should -Contain $env:UNIFI_USER
     }
+
+    It "Should find our user with wildcard search" {
+        (Get-UnifiAdmin -Name "*ad*").Name | Should -Contain $env:UNIFI_USER
+    }
+
+    It "Should find our user with exact name" {
+        (Get-UnifiAdmin -Name $env:UNIFI_USER).Name | Should -Be $env:UNIFI_USER
+    }
+
+    It "Should return nothing with a garbage filter" {
+        Get-UnifiAdmin -Name "totally non existant user" | Should -BeNullOrEmpty
+    }
 }
 
 AfterAll {
