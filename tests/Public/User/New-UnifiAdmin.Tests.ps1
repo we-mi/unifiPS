@@ -53,6 +53,13 @@ Describe "New-UnifiAdmin" {
     It "Should have the mail address filled" {
         Get-UnifiAdmin -Name $newUserName | Select-Object -ExpandProperty Email | Should -Be "user@localhost"
     }
+
+    It "Should re-create the user again and return it's object with -PassThru" {
+        Get-UnifiAdmin -Name $newUserName | Remove-UnifiAdmin -Confirm:$false
+        $user = New-UnifiAdmin -Name $newUserName -Password $newUserPassword -Email "user@localhost" -Confirm:$false -PassThru
+        $user | Should -BeOfType [UnifiUser]
+        $user.name | Should -Be $newUserName
+    }
 }
 
 AfterAll {

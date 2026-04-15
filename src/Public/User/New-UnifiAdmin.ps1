@@ -39,37 +39,30 @@ function New-UnifiAdmin {
             name = $Name
         }
 
-        if ( [String]::IsNullOrWhiteSpace($NewName) -and [String]::IsNullOrWhiteSpace($Email) -and $null -eq $Password)  {
-            Write-Warning "No property was given to update the user '$($UserObject.Name)'. Won't update anything"
-        } else {
-            if ( ![String]::IsNullOrWhiteSpace($NewName) ) {
-                $Body.name = $NewName
-            }
-
-            if ( ![String]::IsNullOrWhiteSpace($Email) ) {
-                $Body.email = $Email
-            }
-
-            if ( $null -ne $Password ) {
-                $Body.x_password = [System.Management.Automation.PSCredential]::new("dummy",$Password).GetNetworkCredential().Password
-            }
-
-            if ( $DoNotRequireNewPassword ) {
-                $Body.requires_new_password = $false
-            } else {
-                $Body.requires_new_password = $true
-            }
-
-            $Method = "POST"
-            $Route = "s/default/cmd/sitemgr" # Updating a user requires a site. We use the default site here, because it's already there without reading all sites first
-
-            if ( $PSCmdlet.ShouldProcess($UserObject.Name, "Create new unifi admin") ) {
-                $jsonResult = Invoke-UnifiRestCall -Method $Method -Route $Route -Body ($Body | ConvertTo-Json)
-            }
-
-            if ($PassThru) {
-                [Unifi.User]::new($jsonResult)
-            }
+        if ( ![String]::IsNullOrWhiteSpace($Email) ) {
+            $Body.email = $Email
         }
+
+        if ( $null -ne $Password ) {
+            $Body.x_password = [System.Management.Automation.PSCredential]::new("dummy",$Password).GetNetworkCredential().Password
+        }
+
+        if ( $DoNotRequireNewPassword.IsPresent ) {
+            $Body.requires_new_password = $false
+        } else {
+            $Body.requires_new_password = $true
+        }
+
+        $Method = "POST"
+        $Route = "s/default/cmd/sitemgr" # Creating a user requires a site. We use the default site here, because it's always present
+
+        if ( $PSCmdlet.ShouldProcess($Name, "Create new unifi admin") ) {
+            $jsonResult = Invoke-UnifiRestCall -Method $Method -Route $Route -Body ($Body | ConvertTo-Json)
+        }
+
+        if ($PassThru) {
+            [Unifi.User]::new($jsonResult)
+        }
+
     }
 }
