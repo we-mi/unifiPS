@@ -33,8 +33,7 @@ Describe "New-UnifiAdmin" {
     It "Should login with the new admin" {
         Invoke-UnifiLogout
 
-        $secureString = $newUserPassword | ConvertTo-SecureString -AsPlainText -Force
-        $cred = [System.Management.Automation.PSCredential]::new($newUserName,$secureString)
+        $cred = [System.Management.Automation.PSCredential]::new($newUserName,$newUserPassword)
 
         { Invoke-UnifiLogin -Uri $env:UNIFI_URI -Credential $cred -Timeout 10 -SkipCertificateCheck } | Should -Not -Throw
 
