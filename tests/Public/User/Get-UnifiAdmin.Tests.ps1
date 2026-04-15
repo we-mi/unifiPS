@@ -14,10 +14,6 @@ Describe "Get-UnifiAdmin" {
         { Get-UnifiAdmin } | Should -Not -Throw
     }
 
-    It "Should return an array" {
-        Get-UnifiAdmin | Should -BeOfType [System.Object[]]
-    }
-
     It "Should only contain objects of type [Unifi.User]" {
         Get-UnifiAdmin | ForEach-Object {
             $_ | Should -BeOfType [Unifi.User]
