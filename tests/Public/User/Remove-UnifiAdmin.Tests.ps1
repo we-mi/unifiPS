@@ -7,8 +7,9 @@ BeforeAll {
 
     Invoke-UnifiLogin -Uri $env:UNIFI_URI -Credential $cred -Timeout 10 -SkipCertificateCheck
 
-    New-UnifiAdmin -Name "to-remove-pipeline"
-    New-UnifiAdmin -Name "to-remove-string"
+    $dummyPass = "dummy" | ConvertTo-SecureString -AsPlainText -Force
+    New-UnifiAdmin -Name "to-remove-pipeline" -Password $dummyPass -Confirm:$false
+    New-UnifiAdmin -Name "to-remove-string" -Password $dummyPass -Confirm:$false
 }
 
 Describe "Remove-UnifiAdmin" {
