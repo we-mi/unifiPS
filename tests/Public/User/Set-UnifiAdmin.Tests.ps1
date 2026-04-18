@@ -39,6 +39,12 @@ Describe "Set-UnifiAdmin" {
     It "Should process multiple objects through a pipeline" {
         { Get-UnifiAdmin | Set-UnifiAdmin -Password $dummyPass -Confirm:$false } | Should -Not -Throw
     }
+
+    It "Should not update the currently logged in user" {
+        { Get-UnifiAdmin -Name $env:UNIFI_USER | Set-UnifiAdmin -Email "thisshouldnotwork@localhost" -Password $dummyPass -Confirm:$false } | Should -Not -Throw
+
+        Get-UnifiAdmin -Name $env:UNIFI_USER | Select-Object -ExpandProperty Email | Should -Not -Be "thisshouldnotwork@localhost"
+    }
 }
 
 AfterAll {
