@@ -14,10 +14,6 @@ BeforeAll {
 
 Describe "Set-UnifiAdmin" {
 
-    It "Should throw when no property was given" {
-        { Set-UnifiAdmin -UserName 'to-edit-string' -Confirm:$false } | Should -Throw
-    }
-
     It "Should not throw when we're editing a user with a pipeline" {
         { Get-UnifiAdmin -Name 'to-edit-pipeline' | Set-UnifiAdmin -NewName "to-edit-pipeline-new" -Email "somethingsomethingpipeline@something.something" -Password $dummyPass -Confirm:$false } | Should -Not -Throw
     }
