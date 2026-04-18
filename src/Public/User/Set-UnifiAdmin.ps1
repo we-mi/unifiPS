@@ -85,7 +85,7 @@ function Set-UnifiAdmin {
             }
 
             if ($PassThru) {
-                [Unifi.User]::new($jsonResult)
+                Get-UnifiAdmin -Name $UserObject.Name
             }
         }
     }
