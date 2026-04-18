@@ -14,6 +14,10 @@ BeforeAll {
 
 Describe "Set-UnifiAdmin" {
 
+    It "Should throw when no property was given" {
+        { Set-UnifiAdmin -UserName 'to-edit-string' -Confirm:$false } | Should -Throw
+    }
+
     It "Should not throw when we're editing a user with a pipeline" {
         { Get-UnifiAdmin -Name 'to-edit-pipeline' | Set-UnifiAdmin -NewName "to-edit-pipeline-new" -Email "somethingsomethingpipeline@something.something" -Password $dummyPass -Confirm:$false } | Should -Not -Throw
     }
@@ -22,7 +26,7 @@ Describe "Set-UnifiAdmin" {
         { Set-UnifiAdmin -UserName "to-edit-string" -NewName "to-edit-string-new" -Email "somethingsomethingstring@something.something" -Password $dummyPass -Confirm:$false } | Should -Not -Throw
     }
 
-    It "Should return unifi user object with -PassThru" {
+    It "Should return a unifi user object with -PassThru" {
         $user = Get-UnifiAdmin -Name 'to-edit-string-new' | Set-UnifiAdmin -Password $dummyPass -Confirm:$false -PassThru
 
         $user | Should -BeOfType [Unifi.User]
@@ -34,6 +38,10 @@ Describe "Set-UnifiAdmin" {
 
     It "Should have a new email" {
         Get-UnifiAdmin -Name 'to-edit-pipeline-new' | Select-Object -ExpandProperty Email | Should -Be "somethingsomethingpipeline@something.something"
+    }
+
+    It "Should process multiple objects through a pipeline" {
+        { Get-UnifiAdmin | Set-UnifiAdmin -Password $dummyPass -Confirm:$false } | Should -Not -Throw
     }
 }
 
