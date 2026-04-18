@@ -44,6 +44,9 @@ function Set-UnifiAdmin {
     begin {
         # Get a list of all users or just us before we do anything
         $allUsers = Get-UnifiAdmin
+
+        # we need our own user because this api endpoint can not update it. yes, even with admin permissions you cannot update your own user and have to use another api endpoint
+        $ourUser = Get-UnifiSelf
     }
 
     process {
@@ -57,7 +60,9 @@ function Set-UnifiAdmin {
             cmd = "update-admin"
         }
 
-        if ( [String]::IsNullOrWhiteSpace($NewName) -and [String]::IsNullOrWhiteSpace($Email) -and $null -eq $Password)  {
+        if ($ourUser.ID -eq $UserObject.ID) {
+            Write-Warning "Cannot update our own user ($($ourUser.Name)) with this cmdlet. Use 'Set-UnifiSelf' instead"
+        } elseif ( [String]::IsNullOrWhiteSpace($NewName) -and [String]::IsNullOrWhiteSpace($Email) -and $null -eq $Password)  {
             Write-Warning "No property was given to update the user '$($UserObject.Name)'. Won't update anything"
         } else {
             $updatedAttributes = New-Object System.Collections.ArrayList
